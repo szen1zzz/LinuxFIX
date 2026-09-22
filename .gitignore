@@ -39,6 +39,19 @@ yarn-error.*
 cloudflared/
 .claude/
 .security-check-*/
+.vscode/
+*.code-workspace
+AGENTS.md
+CLAUDE.md
+BETA_ROADMAP.md
+
+# Local source assets retained outside the repository
+assets/android-icon-background.png
+assets/android-icon-foreground.png
+assets/android-icon-monochrome.png
+assets/archfix-logo.jpg
+assets/icon.png
+assets/splash-icon.png
 
 # Backend runtime data (accounts, token hashes, and conversation history)
 backend/data/

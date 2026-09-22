@@ -1,53 +1,53 @@
-# Regulamin LinuxFIX
+# LinuxFIX Terms of Service
 
-Data wejścia w życie: 30 września 2026 r.
+Effective date: September 30, 2026
 
-## 1. Operator i kontakt
+## 1. Operator and contact
 
-Usługa LinuxFIX jest prowadzona jako prywatny projekt w Polsce. Kontakt: LinuxFIXcontact@proton.me.
+LinuxFIX is operated as a private project in Poland. Contact: LinuxFIXcontact@proton.me.
 
-## 2. Zakres usługi
+## 2. Scope of the service
 
-LinuxFIX udostępnia reguły diagnostyczne i odpowiedzi modelu AI dotyczące systemów Linux. Aplikacja może proponować kroki i polecenia, ale nie wykonuje ich automatycznie i nie łączy się z komputerem użytkownika przez SSH.
+LinuxFIX provides diagnostic rules and AI-generated responses concerning Linux systems. The application may suggest steps and commands, but it does not execute them automatically and does not connect to a user's computer through SSH.
 
-## 3. Wiek użytkownika
+## 3. Minimum age
 
-Użytkownik funkcji przetwarzających dane powinien mieć co najmniej 16 lat. Aktualna wersja LinuxFIX nie udostępnia mechanizmu weryfikacji zgody rodzica lub opiekuna prawnego.
+Users of features that process personal data should be at least 16 years old. The current LinuxFIX version does not provide a mechanism for verifying consent from a parent or legal guardian.
 
-## 4. Konto
+## 4. Accounts
 
-Korzystanie z podstawowych funkcji nie wymaga konta. Użytkownik odpowiada za poufność danych logowania i prawdziwość podanego adresu e-mail. Konto nie może być udostępniane w celu obchodzenia limitów ani prowadzenia nadużyć.
+An account is not required for basic functionality. Users are responsible for keeping their login details confidential and for providing an accurate email address. Accounts must not be shared to evade limits or facilitate abuse.
 
-## 5. Zasady korzystania
+## 5. Acceptable use
 
-Zabronione jest:
+Users must not:
 
-- wykorzystywanie usługi do atakowania systemów bez upoważnienia;
-- automatyczne masowe wysyłanie zapytań lub obchodzenie limitów;
-- przesyłanie cudzych danych osobowych albo sekretów bez podstawy prawnej;
-- zakłócanie działania backendu, modelu lub infrastruktury;
-- podszywanie się pod inną osobę.
+- use the service to attack systems without authorization;
+- send automated bulk requests or bypass service limits;
+- submit another person's personal data or secrets without a lawful basis;
+- disrupt the backend, model, or infrastructure;
+- impersonate another person.
 
-## 6. Odpowiedzialne wykonywanie poleceń
+## 6. Responsible use of commands
 
-Odpowiedzi mają charakter informacyjny i mogą zawierać błędy. Przed uruchomieniem polecenia użytkownik powinien przeczytać jego dokumentację, sprawdzić źródło, poziom ryzyka i wykonać kopię zapasową. Szczególnej ostrożności wymagają polecenia z `sudo`, operacje na dyskach, systemie plików, bootloaderze i uprawnieniach.
+Responses are informational and may contain errors. Before running a suggested command, users should read its documentation, verify its source and risk level, and create an appropriate backup. Commands involving `sudo`, disks, file systems, bootloaders, or permissions require particular care.
 
-## 7. Dostępność
+## 7. Availability
 
-Usługa może być czasowo niedostępna, zmieniana lub ograniczana, szczególnie w okresie alpha i beta. Operator nie gwarantuje ciągłej dostępności, kompletności odpowiedzi ani rozwiązania każdego problemu.
+The service may be temporarily unavailable, changed, or restricted, especially during alpha and beta testing. The operator does not guarantee uninterrupted availability, complete answers, or resolution of every problem.
 
-## 8. Źródła zewnętrzne
+## 8. Third-party sources
 
-Aplikacja może odsyłać do dokumentacji i stron podmiotów trzecich. Operator nie kontroluje ich dostępności ani późniejszych zmian treści.
+The application may link to documentation and websites operated by third parties. The operator does not control their availability or subsequent content changes.
 
-## 9. Usunięcie konta
+## 9. Account deletion
 
-Użytkownik może zażądać usunięcia konta i przypisanych danych z poziomu aplikacji lub pod adresem LinuxFIXcontact@proton.me. Operator może ograniczyć lub zamknąć konto używane do nadużyć.
+Users may request deletion of their account and associated data through the application or by contacting LinuxFIXcontact@proton.me. The operator may restrict or close accounts used for abuse.
 
-## 10. Prawo właściwe
+## 10. Governing law
 
-Regulamin podlega prawu polskiemu oraz bezwzględnie obowiązującym przepisom chroniącym konsumentów w miejscu ich zamieszkania.
+These Terms are governed by Polish law and by any mandatory consumer-protection laws applicable in the user's place of residence.
 
-## 11. Zmiany regulaminu
+## 11. Changes to these Terms
 
-Istotne zmiany będą komunikowane w aplikacji. Dalsze korzystanie może wymagać zaakceptowania nowej wersji.
+Material changes will be communicated in the application. Continued use may require acceptance of an updated version.

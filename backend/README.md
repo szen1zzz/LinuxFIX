@@ -1,112 +1,98 @@
-# LinuxFIX backend
+# LinuxFIX Backend
 
-Backend jest pośrednikiem między aplikacją mobilną a lokalną Ollamą. Obsługuje zarówno logi i błędy, jak i pytania instruktażowe dotyczące wybranej dystrybucji. Nie wkładaj adresu Ollamy, haseł ani kluczy API do APK.
+The backend connects the mobile application to a locally operated Ollama instance. It accepts error logs, diagnostic questions, and Linux how-to questions for the selected distribution. Never place the Ollama address, passwords, or API keys in the APK.
 
-## Uruchomienie
+## Start the backend
 
-Najpierw zainstaluj Ollamę i pobierz model:
+Install Ollama and download the model:
 
 ```powershell
 ollama pull qwen2.5:7b
 ```
 
-Ollama może działać jako usługa w tle. Nie musisz zostawiać osobnego `ollama run` otwartego, jeśli usługa Ollama jest uruchomiona.
+Ollama may run as a background service. You do not need to keep a separate `ollama run` process open while that service is running.
 
-W drugim terminalu uruchom backend:
+Start the backend in another terminal:
 
 ```powershell
 cd C:\Users\nikod\apps\archfix
 npm.cmd run backend
 ```
 
-Sprawdzenie:
+Check its health:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8787/health
 ```
 
-Możesz też otworzyć w przeglądarce:
+You can also open this address in a browser:
 
 ```text
 http://127.0.0.1:8787/
 ```
 
-Adres główny pokazuje informację o backendzie. Do analizy używaj aplikacji albo
-wyślij żądanie `POST` do `/analyze` — samo otwarcie `/analyze` w przeglądarce
-nie uruchomi analizy, ponieważ ten endpoint wymaga danych JSON.
+The root endpoint describes the backend. Use the application or send a JSON `POST` request to `/analyze` to start an analysis. Opening `/analyze` directly in a browser does not start one.
 
-Test analizy:
+Example analysis request:
 
 ```powershell
 $body = @{ distro = "arch"; log = "error: target not found: firefox" } | ConvertTo-Json
 Invoke-RestMethod -Uri http://127.0.0.1:8787/analyze -Method Post -ContentType "application/json" -Body $body
 ```
 
-Backend nie wykonuje komend. Tylko przekazuje log do Ollamy i zwraca propozycję w JSON.
+The backend never executes commands. It sends the request to Ollama and returns a structured JSON suggestion.
 
-### Źródła zależne od dystrybucji
+### Distribution-specific sources
 
-`backend/sources.json` jest statycznym rejestrem krótkich opisów i oficjalnych
-adresów URL dla `arch` i `debian`. Endpoint `/analyze` przekazuje modelowi
-wyłącznie wpisy wybranej dystrybucji; nie pobiera ani nie skanuje internetu
-podczas żądania. Źródła zwrócone przez model są ograniczane do adresów z tego
-samego rejestru i wybranej dystrybucji. Dla nieznanej dystrybucji kontekst źródeł
-jest pusty. Rejestr nie zastępuje aktualnej dokumentacji ani weryfikacji
-poleceń przez użytkownika.
+`backend/sources.json` is a static registry of short descriptions and official URLs for `arch` and `debian`. The `/analyze` endpoint provides only entries belonging to the selected distribution. It does not browse or scan the internet while handling a request.
 
-## Konta i historia AI
+Sources returned by the model are restricted to URLs present in the registry for that distribution. An unknown distribution receives no source context. The registry does not replace current documentation or the user's review of a suggested command.
 
-Backend zapisuje konta, sesje i historię w plikach JSON w `backend/data/`.
-Pliki te są ignorowane przez Git. Rejestracja i logowanie zwracają token sesji,
-który należy wysyłać jako `Authorization: Bearer <token>`.
+## Accounts and AI history
 
-Rejestracja:
+The backend stores accounts, sessions, and history as JSON files in `backend/data/`. Git ignores this directory. Registration and login return a session token that must be sent as `Authorization: Bearer <token>`.
+
+Registration:
 
 ```powershell
 $body = @{ email = "user@example.com"; password = "correct-horse-battery" } | ConvertTo-Json
 $account = Invoke-RestMethod -Uri http://127.0.0.1:8787/auth/register -Method Post -ContentType "application/json" -Body $body
 ```
 
-Logowanie:
+Login:
 
 ```powershell
 $account = Invoke-RestMethod -Uri http://127.0.0.1:8787/auth/login -Method Post -ContentType "application/json" -Body $body
 $headers = @{ Authorization = "Bearer $($account.token)" }
 ```
 
-Wylogowanie unieważnia bieżący token po stronie backendu:
+Logout revokes the current token on the backend:
 
 ```powershell
 Invoke-RestMethod -Uri http://127.0.0.1:8787/auth/logout -Method Post -Headers $headers
 ```
 
-Sesje wygasają po 30 dniach. Ponowne logowanie unieważnia poprzednią sesję tego konta.
+Sessions expire after 30 days. Signing in again revokes the account's previous session.
 
-Pobranie i zapis historii (zapis zastępuje historię tego konta):
+Read and replace the account history:
 
 ```powershell
 Invoke-RestMethod -Uri http://127.0.0.1:8787/history -Headers $headers
 $history = @{ messages = @(
   @{ role = "user"; content = "error: target not found: firefox" },
-  @{ role = "assistant"; content = "Sprawdź nazwę pakietu." }
+  @{ role = "assistant"; content = "Check the package name." }
 ) } | ConvertTo-Json -Depth 5
 Invoke-RestMethod -Uri http://127.0.0.1:8787/history -Method Post -Headers $headers -ContentType "application/json" -Body $history
 ```
 
-Hasła są przechowywane jako klucze pochodne `crypto.scrypt`, a tokeny są
-losowe. Backend zapisuje wyłącznie skróty tokenów sesji. Restart po aktualizacji
-do 0.2.2 unieważnia sesje z wcześniejszych wersji, które zapisywały tokeny
-jawnie. Backend ogranicza logowanie, rejestrację i analizy AI oraz dopuszcza
-maksymalnie dwie równoległe analizy. To nadal prosta persystencja lokalna:
-przed szerszą publiczną premierą wdroż stały HTTPS, Cloudflare WAF lub Turnstile,
-kopie zapasowe i właściwą bazę danych. Chroń katalog `backend/data`, ponieważ
-zawiera dane kont i historię.
+Passwords are stored using keys derived with `crypto.scrypt`. Session tokens are random, and the backend stores only their hashes. Restarting version 0.2.2 revokes sessions created by older versions that stored raw tokens.
 
-## Telefon i dostęp z internetu
+The backend rate-limits registration, login, and AI analysis and permits no more than two concurrent analyses. This remains a simple local persistence layer. Before a wider public release, deploy stable HTTPS, Cloudflare WAF or Turnstile, backups, and a production database. Protect `backend/data/` because it contains account data and conversation history.
 
-`127.0.0.1` działa tylko wtedy, gdy aplikacja i backend są na tym samym urządzeniu. Telefon potrzebuje publicznego hosta HTTPS. Backend od wersji 0.2.2 nasłuchuje domyślnie wyłącznie na `127.0.0.1`, aby nie udostępniać kont i historii wszystkim urządzeniom w lokalnej sieci. To współpracuje z Cloudflare Tunnel. Świadomie ustaw `HOST=0.0.0.0` tylko wtedy, gdy chcesz otworzyć dostęp LAN.
+## Phone and internet access
 
-Tymczasowy Quick Tunnel Cloudflare może dać adres `https://...trycloudflare.com`, ale adres może zmienić się po restarcie. Nie traktuj go jako stałego adresu produkcyjnego.
+`127.0.0.1` is accessible only from the machine running the backend. The backend listens only on `127.0.0.1` by default so account data and history are not exposed to every device on the local network. This works with Cloudflare Tunnel. Set `HOST=0.0.0.0` only when you intentionally want to allow LAN access.
 
-Quick Tunnel nadaje się do małej, kontrolowanej bety. Przed otwartym publicznym
-ruchem skonfiguruj stały HTTPS oraz ochronę Cloudflare przed automatycznym ruchem.
+A temporary Cloudflare Quick Tunnel can provide an address such as `https://...trycloudflare.com`, but that address may change after a restart. Do not treat it as a stable production endpoint.
+
+Quick Tunnel is suitable for a small, controlled beta. Configure stable HTTPS and Cloudflare abuse protection before accepting wider public traffic.

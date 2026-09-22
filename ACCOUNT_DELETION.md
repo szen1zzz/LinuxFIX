@@ -1,14 +1,14 @@
-# Usunięcie konta LinuxFIX
+# LinuxFIX Account Deletion
 
-Użytkownik może trwale usunąć konto i przypisaną historię bezpośrednio w aplikacji:
+Users can permanently delete their account and associated history directly in the application:
 
-1. Otwórz sekcję **Konto**.
-2. Zaloguj się, jeśli aplikacja o to poprosi.
-3. Wybierz **Usuń konto i historię**.
-4. Potwierdź trwałe usunięcie.
+1. Open the **Account** section.
+2. Sign in if prompted.
+3. Select **Delete account and history**.
+4. Confirm permanent deletion.
 
-Po potwierdzeniu backend usuwa rekord konta, wszystkie jego sesje i przypisaną historię analiz. Tej operacji nie można cofnąć.
+After confirmation, the backend deletes the account record, all sessions belonging to that account, and its associated analysis history. This operation cannot be undone.
 
-Jeżeli użytkownik nie ma dostępu do aplikacji, może wysłać żądanie na LinuxFIXcontact@proton.me z adresu e-mail przypisanego do konta.
+Users who cannot access the application may send a deletion request to LinuxFIXcontact@proton.me from the email address associated with the account.
 
-Historia analiz jest niezależnie usuwana automatycznie po maksymalnie 7 dniach.
+Analysis history is independently deleted automatically after no more than 7 days.

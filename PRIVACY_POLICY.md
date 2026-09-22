@@ -1,73 +1,73 @@
-# Polityka prywatności LinuxFIX
+# LinuxFIX Privacy Policy
 
-Data wejścia w życie: 30 września 2026 r.
+Effective date: September 30, 2026
 
-## 1. Administrator danych
+## 1. Data controller
 
-Administratorem danych jest LinuxFIX, prywatny projekt prowadzony w Polsce. Kontakt w sprawach prywatności: LinuxFIXcontact@proton.me.
+The data controller is LinuxFIX, a private project operated in Poland. For privacy-related matters, contact LinuxFIXcontact@proton.me.
 
-Przed publiczną dystrybucją operator powinien uzupełnić ten dokument o pełną tożsamość osoby fizycznej albo zarejestrowanej firmy odpowiedzialnej za projekt.
+Before public distribution, the operator should supplement this document with the full identity of the individual or registered business responsible for the project.
 
-## 2. Jakie dane przetwarzamy
+## 2. Data we process
 
-LinuxFIX może przetwarzać:
+LinuxFIX may process:
 
-- treść pytań, logów i komunikatów błędów wysyłanych przez użytkownika;
-- wybraną dystrybucję Linuksa;
-- adres e-mail, skrót hasła, identyfikator konta i token sesji, jeśli użytkownik utworzy konto;
-- historię analiz przypisaną do konta;
-- techniczne dane połączenia, takie jak adres IP i czas żądania, w zakresie przetwarzanym przez serwer i dostawców infrastruktury;
-- zapis zgody prywatności oraz ustawienia aplikacji przechowywane lokalnie na urządzeniu.
+- questions, logs, and error messages submitted by the user;
+- the selected Linux distribution;
+- an email address, password hash, account identifier, and session token when the user creates an account;
+- analysis history associated with the account;
+- technical connection data, such as an IP address and request time, to the extent processed by the server and infrastructure providers;
+- the privacy consent record and application preferences stored locally on the user's device.
 
-Nie należy wysyłać haseł, kluczy API, tokenów, kluczy prywatnych ani innych sekretów w treści logu.
+Do not include passwords, API keys, tokens, private keys, or other secrets in submitted logs.
 
-## 3. Cele i podstawy przetwarzania
+## 3. Purposes and legal bases
 
-Dane są przetwarzane w celu:
+Data is processed to:
 
-- wykonania analizy i udzielenia odpowiedzi;
-- synchronizacji historii między sesjami zalogowanego użytkownika;
-- utrzymania bezpieczeństwa, ograniczania nadużyć i diagnozowania awarii;
-- obsługi konta oraz żądań usunięcia danych.
+- perform an analysis and provide a response;
+- synchronize history between sessions for signed-in users;
+- maintain security, prevent abuse, and diagnose service failures;
+- operate accounts and fulfill deletion requests.
 
-Podstawą przetwarzania jest wykonanie usługi żądanej przez użytkownika, jego zgoda na przesłanie treści do backendu i modelu AI oraz uzasadniony interes operatora polegający na ochronie usługi przed nadużyciami.
+The legal bases are performance of the service requested by the user, the user's consent to sending submitted content to the backend and AI model, and the operator's legitimate interest in protecting the service against abuse.
 
-## 4. Przetwarzanie przez AI i dostawców infrastruktury
+## 4. AI and infrastructure providers
 
-Treść wysłana do analizy AI trafia przez backend LinuxFIX do lokalnego modelu Ollama. Połączenie publiczne może być obsługiwane przez infrastrukturę Cloudflare. Aplikacja pobiera publiczną konfigurację adresu backendu z GitHub Pages.
+Content submitted for AI analysis is sent through the LinuxFIX backend to a locally operated Ollama model. Public connectivity may be provided through Cloudflare infrastructure. The application retrieves the public backend configuration from the LinuxFIX configuration repository on GitHub.
 
-LinuxFIX nie sprzedaje danych użytkowników. Dane mogą być technicznie przetwarzane przez dostawców infrastruktury wyłącznie w zakresie potrzebnym do transmisji i działania usługi.
+LinuxFIX does not sell user data. Infrastructure providers may technically process data only to the extent required to transmit it and operate the service.
 
-## 5. Okres przechowywania
+## 5. Retention
 
-- historia analiz przypisana do konta jest przechowywana maksymalnie 7 dni;
-- dane konta są przechowywane do chwili usunięcia konta;
-- sesja wygasa najpóźniej po 30 dniach albo wcześniej po wylogowaniu;
-- lokalny zapis zgody pozostaje na urządzeniu do jej wycofania albo usunięcia danych aplikacji;
-- dane wymagane do ochrony przed nadużyciami są przechowywane tylko przez okres niezbędny do realizacji tego celu.
+- analysis history associated with an account is retained for no longer than 7 days;
+- account data is retained until the account is deleted;
+- a session expires after no more than 30 days, or earlier after logout;
+- the local consent record remains on the device until consent is withdrawn or the application's data is removed;
+- data required to prevent abuse is retained only for as long as necessary for that purpose.
 
-## 6. Analityka i raporty awarii
+## 6. Analytics and crash reporting
 
-Aktualna wersja nie uruchamia zewnętrznej analityki ani automatycznego raportowania awarii. Jeżeli takie funkcje zostaną dodane, użytkownik otrzyma informację o dostawcy, zakresie danych i podstawie przetwarzania przed ich włączeniem, a polityka zostanie zaktualizowana.
+The current version does not use external analytics or automated crash reporting. If such features are added, users will be informed about the provider, data scope, and legal basis before activation, and this policy will be updated.
 
 ## 7. Cookies
 
-Aplikacja mobilna LinuxFIX nie używa cookies ani reklamowych identyfikatorów śledzących. Z tego powodu nie wyświetla bannera cookies. Jeśli przyszła wersja internetowa zacznie korzystać z opcjonalnych cookies, osobna zgoda zostanie dodana przed ich zapisaniem.
+The LinuxFIX mobile application does not use cookies or advertising tracking identifiers. It therefore does not display a cookie banner. If a future web version uses optional cookies, separate consent will be requested before they are stored.
 
-## 8. Prawa użytkownika
+## 8. User rights
 
-Użytkownik może zażądać dostępu, poprawienia, usunięcia lub ograniczenia przetwarzania danych, wycofać zgodę oraz zgłosić sprzeciw. Żądanie można wysłać na LinuxFIXcontact@proton.me. Użytkownik ma również prawo złożyć skargę do Prezesa Urzędu Ochrony Danych Osobowych.
+Users may request access to, correction of, deletion of, or restriction of their personal data, withdraw consent, or object to processing. Requests may be sent to LinuxFIXcontact@proton.me. Users also have the right to submit a complaint to the President of the Personal Data Protection Office in Poland or another competent supervisory authority.
 
-Wycofanie zgody nie wpływa na zgodność wcześniejszego przetwarzania z prawem.
+Withdrawal of consent does not affect the lawfulness of processing carried out before the withdrawal.
 
-## 9. Dzieci
+## 9. Children
 
-Aktualna wersja funkcji przetwarzających dane jest przeznaczona dla osób, które ukończyły 16 lat. LinuxFIX nie udostępnia obecnie mechanizmu weryfikacji zgody rodzica lub opiekuna prawnego, dlatego osoby młodsze nie powinny korzystać z konta ani analizy AI.
+Features that process personal data are intended for users aged 16 or older. LinuxFIX currently has no mechanism for verifying consent from a parent or legal guardian, so younger users should not create an account or use AI analysis.
 
-## 10. Bezpieczeństwo
+## 10. Security
 
-LinuxFIX stosuje szyfrowane połączenia publiczne, hashowanie haseł, wygasające sesje, kontrolę dostępu, walidację danych i ograniczanie liczby żądań. Żaden system nie zapewnia jednak całkowitego braku ryzyka.
+LinuxFIX uses encrypted public connections, password hashing, expiring sessions, access controls, input validation, and request rate limiting. No system can guarantee complete security.
 
-## 11. Zmiany polityki
+## 11. Changes to this policy
 
-Istotne zmiany polityki będą komunikowane w aplikacji. Jeżeli zmieni się zakres przetwarzania wymagający zgody, aplikacja poprosi o nią ponownie.
+Material changes will be communicated in the application. If a change requires new consent, the application will request it again.
