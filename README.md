@@ -2,7 +2,15 @@
 
 > A mobile assistant for diagnosing Linux problems.
 
-**Status: private beta — `0.2.2-beta.0`**
+<p>
+  <a href="https://github.com/szen1zzz/LinuxFIX/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/szen1zzz/LinuxFIX?include_prereleases&amp;sort=semver&amp;style=flat-square&amp;label=release&amp;color=499BED"></a>
+  <a href="https://github.com/szen1zzz/LinuxFIX/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/szen1zzz/LinuxFIX?style=flat-square&amp;color=499BED"></a>
+  <a href="https://github.com/szen1zzz/LinuxFIX/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/szen1zzz/LinuxFIX?style=flat-square&amp;color=A1C6F6"></a>
+  <img alt="Repository size" src="https://img.shields.io/github/repo-size/szen1zzz/LinuxFIX?style=flat-square&amp;color=022E5B">
+  <img alt="README views" src="https://visitor-badge.laobi.icu/badge?page_id=szen1zzz.LinuxFIX&amp;left_color=031725&amp;right_color=499BED&amp;left_text=README%20views">
+</p>
+
+**Status: private beta | `0.2.2-beta.0`**
 
 LinuxFIX accepts a terminal error, log, or Linux how-to question and returns short troubleshooting suggestions, example commands, and optional analysis from a local Ollama model.
 
@@ -26,7 +34,7 @@ LinuxFIX accepts a terminal error, log, or Linux how-to question and returns sho
 
 The local database contains 24 distribution-aware rules covering Pacman, AUR, APT, DPKG, systemd, graphics, networking, audio, boot, permissions, disks, the kernel, locale, terminals, and general troubleshooting. Rules live in [data/errorDatabase.ts](data/errorDatabase.ts).
 
-## Alpha limitations
+## Beta limitations
 
 The current version uses a local rule database and can send logs to Ollama through the backend. It does not yet crawl forums or Arch Wiki automatically. LinuxFIX does not execute commands automatically and does not connect to a user's computer over SSH.
 
@@ -121,6 +129,14 @@ archfix/
 4. Import logs from files or screenshots.
 5. Add account recovery and a production session store.
 6. Move account data and rate limits to managed production infrastructure.
+
+## Development activity
+
+The chart shows public GitHub activity for the project owner and may include work outside this repository.
+
+[![Development activity](https://ghchart.rshah.org/499BED/szen1zzz)](https://github.com/szen1zzz)
+
+<!-- Dynamic badges depend on Shields.io, visitor-badge.laobi.icu, and ghchart.rshah.org. -->
 
 ## License
 

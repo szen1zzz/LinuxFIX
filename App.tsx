@@ -74,7 +74,7 @@ type GlassSplinterGroup = {
   tone: 'accent' | 'muted' | 'text';
 };
 
-const BACKEND_CONFIG_URL = 'https://raw.githubusercontent.com/szczecin666/linuxfix-config/main/config.json';
+const BACKEND_CONFIG_URL = 'https://raw.githubusercontent.com/szen1zzz/linuxfix-config/main/config.json';
 const DEFAULT_BACKEND_URL = '';
 const PRIVACY_CONSENT_KEY = 'linuxfix.privacy-consent';
 const PRIVACY_CONSENT_VERSION = '2026-09-30';
