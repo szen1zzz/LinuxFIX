@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "LinuxFIX",
+    "slug": "archfix",
+    "version": "0.2.2-beta.0",
+    "orientation": "portrait",
+    "icon": "./assets/linuxfix-logo.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.archfix.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#022E5B",
+        "foregroundImage": "./assets/linuxfix-logo.png",
+        "backgroundImage": "./assets/linuxfix-logo.png",
+        "monochromeImage": "./assets/linuxfix-logo.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "671edaac-3622-4c88-9a12-4ddfcbc6d81e"
+      }
+    },
+    "owner": "linuxfix",
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
+        }
+      ],
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

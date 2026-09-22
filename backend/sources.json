@@ -1,0 +1,26 @@
+{
+  "arch": [
+    {
+      "title": "Arch Linux Wiki: Pacman",
+      "url": "https://wiki.archlinux.org/title/Pacman",
+      "description": "Oficjalna dokumentacja menedżera pakietów pacman."
+    },
+    {
+      "title": "Arch Linux Wiki: General recommendations",
+      "url": "https://wiki.archlinux.org/title/General_recommendations",
+      "description": "Oficjalne, ogólne zalecenia dotyczące systemu Arch Linux."
+    }
+  ],
+  "debian": [
+    {
+      "title": "Debian Handbook: Package management",
+      "url": "https://www.debian.org/doc/manuals/debian-handbook/sect.managing-packages.en.html",
+      "description": "Oficjalny podręcznik Debiana dotyczący zarządzania pakietami."
+    },
+    {
+      "title": "Debian Wiki: Apt",
+      "url": "https://wiki.debian.org/Apt",
+      "description": "Oficjalna wiki Debiana dotycząca narzędzia apt."
+    }
+  ]
+}
