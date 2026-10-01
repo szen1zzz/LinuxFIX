@@ -10,31 +10,39 @@
   <img alt="README views" src="https://visitor-badge.laobi.icu/badge?page_id=szen1zzz.LinuxFIX&amp;left_color=031725&amp;right_color=499BED&amp;left_text=README%20views">
 </p>
 
-**Status: private beta | `0.2.2-beta.0`**
+**Status: full release | `0.2.3`**
+
+[Download LinuxFIX 0.2.3 for Android](https://github.com/szen1zzz/LinuxFIX/releases/tag/LinuxFIX-0.2.3) · [Release notes](RELEASE_NOTES_0.2.3.md)
 
 LinuxFIX accepts a terminal error, log, or Linux how-to question and returns short troubleshooting suggestions, example commands, and optional analysis from a local Ollama model.
 
-> This is a prototype. Always review commands and their risk before running them.
+> Review suggested commands and their risk before running them.
 
 ## Features
 
-- Local matching for common Arch Linux problems.
-- Debian mode with the same diagnostic engine.
+- Distribution-aware workspaces for Arch Linux, Debian, Fedora, NixOS, and CachyOS.
+- Local matching for common errors, with commands and curated source links.
 - Natural-language Linux questions such as how to configure a service or inspect the system.
 - Similar-problem suggestions for typos.
 - Suggested commands and source links.
 - Optional AI analysis through a configurable backend.
 - Automatic AI host availability indicator.
 - Polish and English problem descriptions.
-- Account registration and login through the backend.
-- Synchronized AI conversation history for signed-in users.
+- Username or email registration and login with Supabase Auth.
+- Supabase-synchronized AI conversation history for signed-in users, retained for up to 7 days.
 - Startup connection animation.
 - Dark and light appearance settings.
 - No automatic command execution.
 
 The local database contains 24 distribution-aware rules covering Pacman, AUR, APT, DPKG, systemd, graphics, networking, audio, boot, permissions, disks, the kernel, locale, terminals, and general troubleshooting. Rules live in [data/errorDatabase.ts](data/errorDatabase.ts).
 
-## Beta limitations
+## Workspace Design Lab
+
+Administrator and developer accounts can open **Settings → Developer / Administrator panel → Workspace Design Lab**. Quiet remains the default for regular accounts. The lab offers Classic, Hyprland, Mosaic, Quiet, Atelier, and Clarity. Each preset styles the home screen, composer, analysis, commands, and sources in light and dark mode. Selection is stored locally on the device.
+
+Roles come from the server-managed Supabase allowlist; see [developer access setup](supabase/DEVELOPER_ACCESS.md). Signing out or changing accounts clears active testing controls.
+
+## Current scope
 
 The current version uses a local rule database and can send logs to Ollama through the backend. It does not yet crawl forums or Arch Wiki automatically. LinuxFIX does not execute commands automatically and does not connect to a user's computer over SSH.
 
@@ -45,8 +53,22 @@ The current version uses a local rule database and can send logs to Ollama throu
 - Ollama runs locally on the computer hosting the backend.
 - A Cloudflare Quick Tunnel (`trycloudflare.com`) has a temporary URL that may change after a restart.
 - The app reads the current backend address from the public LinuxFIX `config.json` on GitHub's `main` branch. Update that file after a Quick Tunnel address changes; never store secrets in it.
-- The API sends security headers, limits login, registration, and AI analysis requests, and caps concurrent AI work. These controls make a small private beta safer, but they are not a replacement for Cloudflare WAF or a production abuse-prevention service.
-- The current account storage is a local JSON persistence layer intended for a small beta, not a production database.
+- The API sends security headers, limits login, registration, and AI analysis requests, and caps concurrent AI work. These controls limit misuse; a public backend also needs appropriate hosting and abuse prevention.
+- Account access is protected by Supabase Auth and row-level security. The public key in the app is not a server secret; the `SUPABASE_SECRET_KEY` is backend-only.
+
+### Configure Supabase
+
+Create a Supabase project, then copy `.env.example` to `.env` and enter the project's URL and publishable key. Never place the secret key in an `EXPO_PUBLIC_` variable.
+
+Apply the database migration after authenticating the CLI:
+
+```powershell
+npx.cmd supabase login
+npx.cmd supabase link --project-ref YOUR_PROJECT_REF
+npx.cmd supabase db push
+```
+
+The migration in `supabase/migrations/` creates `analysis_history`, enables row-level security, grants only the required operations, and schedules deletion of entries older than 7 days.
 
 ## Run the app with Expo Go
 
@@ -92,7 +114,7 @@ Check it:
 Invoke-RestMethod http://127.0.0.1:8787/health
 ```
 
-On a phone, `127.0.0.1` means the phone itself. Use the computer's LAN address, such as `http://192.168.1.10:8787`, or a configured HTTPS host. See [backend/README.md](backend/README.md) for account and history endpoints.
+On a phone, `127.0.0.1` means the phone itself. Use the computer's LAN address, such as `http://192.168.1.10:8787`, or a configured HTTPS host. See [backend/README.md](backend/README.md) for backend configuration.
 
 ## Build a private APK
 
@@ -118,6 +140,10 @@ archfix/
 │   └── README.md
 ├── data/
 │   └── errorDatabase.ts
+├── lib/
+│   └── supabase.ts
+├── supabase/
+│   └── migrations/
 └── README.md
 ```
 
@@ -127,8 +153,8 @@ archfix/
 2. Add trusted-source search with links and citations.
 3. Add RAG for Arch Wiki, forums, and package documentation.
 4. Import logs from files or screenshots.
-5. Add account recovery and a production session store.
-6. Move account data and rate limits to managed production infrastructure.
+5. Add a password-recovery flow and account email management.
+6. Move rate limits to durable managed infrastructure.
 
 ## Development activity
 
@@ -140,7 +166,7 @@ The chart shows public GitHub activity for the project owner and may include wor
 
 ## License
 
-This repository is shared as a private beta. The included LinuxFIX license is “all rights reserved”: people may evaluate the source in the repository, but may not reuse or redistribute it without written permission. Third-party packages retain their own licenses.
+The included LinuxFIX license is “all rights reserved”: people may evaluate the source in the repository, but may not reuse or redistribute it without written permission. Third-party packages retain their own licenses.
 
 The `"private": true` field in `package.json` concerns npm package publishing, not GitHub repository visibility.
 
@@ -157,10 +183,10 @@ Safe to publish:
 
 Do not publish:
 
-- `backend/data/` (accounts, session-token hashes, and conversation history),
+- `backend/data/` (legacy beta accounts, session-token hashes, and conversation history),
 - `.env` files, passwords, API keys, session tokens, or Cloudflare credentials,
 - `.cloudflared/` configuration or credential files,
 - private logs, personal data, or real user accounts,
 - a live backend URL if you do not want it discovered.
 
-Public source code cannot be made impossible to copy or inspect. Keep the repository private while the backend uses a Quick Tunnel, enable two-factor authentication on GitHub, protect the default branch, and add Cloudflare WAF or Turnstile before a wider public launch.
+Public source code cannot be made impossible to copy or inspect. For sustained public service, use stable backend hosting and abuse prevention. Protect the default branch and enable two-factor authentication for maintainers.

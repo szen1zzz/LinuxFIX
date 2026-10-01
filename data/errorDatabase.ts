@@ -10,7 +10,7 @@ export type ErrorRule = {
   id: string;
   category: string;
   match: RegExp;
-  distro?: 'arch' | 'debian' | 'all';
+  distro?: 'arch' | 'debian' | 'fedora' | 'nixos' | 'cachyos' | 'all';
   fix: Fix;
 };
 
@@ -328,6 +328,84 @@ export const errorDatabase: ErrorRule[] = [
       commands: ['grep -R "^deb" /etc/apt/sources.list /etc/apt/sources.list.d/', 'sudo apt update'],
       source: 'https://wiki.debian.org/Apt',
       sourceLabel: 'Debian Wiki: Apt',
+    },
+  },
+  {
+    id: 'fedora-package-not-found',
+    category: 'DNF',
+    distro: 'fedora',
+    match: /unable to find a match|no match for argument|no package .* available/i,
+    fix: {
+      title: 'Pakiet nie został znaleziony przez DNF',
+      summary: 'Sprawdź nazwę pakietu i aktywne repozytoria, a następnie bezpiecznie odśwież metadane DNF.',
+      commands: ['dnf search nazwa-pakietu', 'dnf repolist', 'sudo dnf makecache --refresh'],
+      source: 'https://docs.fedoraproject.org/en-US/quick-docs/dnf/',
+      sourceLabel: 'Fedora Docs: DNF',
+    },
+  },
+  {
+    id: 'fedora-rpm-transaction',
+    category: 'RPM / DNF',
+    distro: 'fedora',
+    match: /transaction test error|conflicting requests|problem with installed package/i,
+    fix: {
+      title: 'Konflikt transakcji RPM',
+      summary: 'Najpierw sprawdź spójność zależności. Przed synchronizacją przeczytaj listę pakietów, które DNF chce zmienić.',
+      commands: ['sudo dnf check', 'sudo dnf distro-sync --assumeno'],
+      source: 'https://docs.fedoraproject.org/en-US/quick-docs/dnf/',
+      sourceLabel: 'Fedora Docs: DNF',
+    },
+  },
+  {
+    id: 'nixos-attribute-missing',
+    category: 'Nix',
+    distro: 'nixos',
+    match: /attribute .* missing|attribute .* not found|undefined variable/i,
+    fix: {
+      title: 'Brak atrybutu lub pakietu Nix',
+      summary: 'Sprawdź poprawną nazwę atrybutu w bieżącym zestawie Nixpkgs przed zmianą konfiguracji systemu.',
+      commands: ['nix search nixpkgs nazwa-pakietu', 'sudo nixos-rebuild dry-build'],
+      source: 'https://nixos.org/manual/nixos/stable/',
+      sourceLabel: 'NixOS Manual',
+    },
+  },
+  {
+    id: 'nixos-rebuild-failed',
+    category: 'NixOS rebuild',
+    distro: 'nixos',
+    match: /nixos-rebuild.*failed|failed to build the system configuration|builder for .* failed/i,
+    fix: {
+      title: 'Nieudana przebudowa NixOS',
+      summary: 'Wykonaj najpierw bezpieczną próbę budowania i przeczytaj pierwszy właściwy błąd ewaluacji lub budowania.',
+      commands: ['sudo nixos-rebuild dry-build', 'nix-store --verify --check-contents'],
+      source: 'https://nixos.org/manual/nixos/stable/',
+      sourceLabel: 'NixOS Manual',
+    },
+  },
+  {
+    id: 'cachyos-signature-error',
+    category: 'Pacman / keyring',
+    distro: 'cachyos',
+    match: /signature .* unknown trust|invalid or corrupted package|key .* could not be looked up/i,
+    fix: {
+      title: 'Problem z podpisem pakietu CachyOS',
+      summary: 'Najpierw zsynchronizuj system i oceń stan mirrorów. Nie wyłączaj sprawdzania podpisów pakietów.',
+      commands: ['sudo pacman -Syu', 'sudo cachyos-rate-mirrors'],
+      source: 'https://wiki.cachyos.org/cachyos_basic/faq/',
+      sourceLabel: 'CachyOS FAQ and Troubleshooting',
+    },
+  },
+  {
+    id: 'cachyos-mirror-error',
+    category: 'CachyOS mirrors',
+    distro: 'cachyos',
+    match: /failed retrieving file|operation too slow|could not resolve host|mirror.*out of sync/i,
+    fix: {
+      title: 'Problem z mirrorami CachyOS',
+      summary: 'Sprawdź połączenie, wybierz aktualne mirrory CachyOS i dopiero wtedy ponów pełną aktualizację.',
+      commands: ['ping -c 3 mirror.cachyos.org', 'sudo cachyos-rate-mirrors', 'sudo pacman -Syu'],
+      source: 'https://wiki.cachyos.org/cachyos_basic/faq/',
+      sourceLabel: 'CachyOS FAQ and Troubleshooting',
     },
   },
 ];

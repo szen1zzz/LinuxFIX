@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinuxFIX",
     "slug": "archfix",
-    "version": "0.2.2-beta.0",
+    "version": "0.2.3",
     "orientation": "portrait",
     "icon": "./assets/linuxfix-logo.png",
     "userInterfaceStyle": "light",
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/linuxfix-logo.png",
         "monochromeImage": "./assets/linuxfix-logo.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 23
     },
     "web": {
       "favicon": "./assets/favicon.png"

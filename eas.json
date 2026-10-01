@@ -1,6 +1,11 @@
 {
+  "cli": {
+    "appVersionSource": "local"
+  },
   "build": {
     "preview": {
+      "environment": "preview",
+      "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
@@ -8,6 +13,13 @@
     "production": {
       "android": {
         "buildType": "app-bundle"
+      }
+    },
+    "release": {
+      "environment": "production",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
       }
     }
   }

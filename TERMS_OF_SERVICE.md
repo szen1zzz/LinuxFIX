@@ -34,7 +34,7 @@ Responses are informational and may contain errors. Before running a suggested c
 
 ## 7. Availability
 
-The service may be temporarily unavailable, changed, or restricted, especially during alpha and beta testing. The operator does not guarantee uninterrupted availability, complete answers, or resolution of every problem.
+The service may be temporarily unavailable, changed, or restricted. The operator does not guarantee uninterrupted availability, complete answers, or resolution of every problem.
 
 ## 8. Third-party sources
 

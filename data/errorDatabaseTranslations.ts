@@ -127,6 +127,36 @@ const englishRuleText: Record<string, EnglishRuleText> = {
     title: 'APT repository problem',
     summary: 'Check the repository address, release name, and network connection. Do not disable signature verification as a workaround.',
   },
+  'fedora-package-not-found': {
+    category: 'DNF packages',
+    title: 'DNF could not find the package',
+    summary: 'Check the package name and enabled repositories, then safely refresh the DNF metadata.',
+  },
+  'fedora-rpm-transaction': {
+    category: 'RPM / DNF',
+    title: 'RPM transaction conflict',
+    summary: 'Check dependency consistency first. Review every package DNF proposes to change before synchronizing.',
+  },
+  'nixos-attribute-missing': {
+    category: 'Nix',
+    title: 'Missing Nix attribute or package',
+    summary: 'Check the correct attribute name in the current Nixpkgs set before changing the system configuration.',
+  },
+  'nixos-rebuild-failed': {
+    category: 'NixOS rebuild',
+    title: 'NixOS rebuild failed',
+    summary: 'Run a safe dry build first and inspect the first meaningful evaluation or build error.',
+  },
+  'cachyos-signature-error': {
+    category: 'Pacman / keyring',
+    title: 'CachyOS package signature problem',
+    summary: 'Synchronize the system and check mirror health first. Never disable package signature verification.',
+  },
+  'cachyos-mirror-error': {
+    category: 'CachyOS mirrors',
+    title: 'CachyOS mirror problem',
+    summary: 'Check connectivity, select current CachyOS mirrors, and only then retry the full upgrade.',
+  },
 };
 
 export function localizedFix(rule: ErrorRule, language: 'pl' | 'en'): Fix {

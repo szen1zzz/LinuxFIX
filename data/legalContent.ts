@@ -7,7 +7,7 @@ export const legalDocuments: Record<LegalDocumentId, { title: string; content: s
 
 Administratorem danych jest LinuxFIX, prywatny projekt prowadzony w Polsce. Kontakt: LinuxFIXcontact@proton.me.
 
-LinuxFIX może przetwarzać treść pytań, logów i błędów, wybraną dystrybucję, a dla kont także adres e-mail, skrót hasła, token sesji i historię analiz. Treść wysłana do AI trafia przez backend LinuxFIX do lokalnego modelu Ollama. Transmisję może obsługiwać Cloudflare, a publiczna konfiguracja backendu jest pobierana z GitHub Pages.
+LinuxFIX może przetwarzać treść pytań, logów i błędów, wybraną dystrybucję, a dla kont także nazwę użytkownika lub adres e-mail, identyfikator konta, dane sesji i historię analiz. Uwierzytelnianie hasłem oraz historia zalogowanego konta są obsługiwane przez infrastrukturę Supabase. Treść wysłana do AI trafia przez backend LinuxFIX do lokalnego modelu Ollama. Transmisję może obsługiwać Cloudflare, a publiczna konfiguracja backendu jest pobierana z GitHub Pages.
 
 Dane służą do wykonania analizy, synchronizacji historii, obsługi konta i ochrony przed nadużyciami. LinuxFIX nie sprzedaje danych. Nie wysyłaj w logach haseł, kluczy API, tokenów ani kluczy prywatnych.
 
@@ -33,7 +33,7 @@ Nie wolno używać usługi do atakowania systemów bez upoważnienia, masowego w
 
 Odpowiedzi mogą zawierać błędy. Przed uruchomieniem polecenia sprawdź dokumentację, źródło i poziom ryzyka oraz wykonaj kopię zapasową. Zachowaj szczególną ostrożność przy sudo, dyskach, systemach plików, bootloaderze i uprawnieniach.
 
-Usługa alpha i beta może być czasowo niedostępna lub zmieniana. Użytkownik może usunąć konto i dane z aplikacji albo przez kontakt e-mail.
+Usługa może być czasowo niedostępna lub zmieniana. Użytkownik może usunąć konto i dane z aplikacji albo przez kontakt e-mail.
 
 Regulamin podlega prawu polskiemu oraz bezwzględnie obowiązującym prawom konsumenta.`,
   },

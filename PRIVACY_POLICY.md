@@ -14,7 +14,7 @@ LinuxFIX may process:
 
 - questions, logs, and error messages submitted by the user;
 - the selected Linux distribution;
-- an email address, password hash, account identifier, and session token when the user creates an account;
+- a username or email address, account identifier, and session credentials when the user creates an account; password authentication is handled by Supabase Auth;
 - analysis history associated with the account;
 - technical connection data, such as an IP address and request time, to the extent processed by the server and infrastructure providers;
 - the privacy consent record and application preferences stored locally on the user's device.
@@ -34,7 +34,7 @@ The legal bases are performance of the service requested by the user, the user's
 
 ## 4. AI and infrastructure providers
 
-Content submitted for AI analysis is sent through the LinuxFIX backend to a locally operated Ollama model. Public connectivity may be provided through Cloudflare infrastructure. The application retrieves the public backend configuration from the LinuxFIX configuration repository on GitHub.
+Content submitted for AI analysis is sent through the LinuxFIX backend to a locally operated Ollama model. Public connectivity may be provided through Cloudflare infrastructure. The application retrieves the public backend configuration from the LinuxFIX configuration repository on GitHub. Account authentication and signed-in analysis history are processed using Supabase infrastructure.
 
 LinuxFIX does not sell user data. Infrastructure providers may technically process data only to the extent required to transmit it and operate the service.
 
@@ -66,7 +66,7 @@ Features that process personal data are intended for users aged 16 or older. Lin
 
 ## 10. Security
 
-LinuxFIX uses encrypted public connections, password hashing, expiring sessions, access controls, input validation, and request rate limiting. No system can guarantee complete security.
+LinuxFIX uses encrypted public connections, Supabase password authentication, expiring application sessions, row-level database access controls, input validation, and request rate limiting. No system can guarantee complete security.
 
 ## 11. Changes to this policy
 

@@ -41,16 +41,33 @@ Invoke-RestMethod -Uri http://127.0.0.1:8787/analyze -Method Post -ContentType "
 ```
 
 The backend never executes commands. It sends the request to Ollama and returns a structured JSON suggestion.
+For actionable how-to questions, the model is instructed to return a command that can be typed in a terminal, with a plain-language explanation in the same step. If a safe concrete command cannot be determined without more information, the command remains empty rather than being guessed. Users should review every suggestion before running it.
 
 ### Distribution-specific sources
 
-`backend/sources.json` is a static registry of short descriptions and official URLs for `arch` and `debian`. The `/analyze` endpoint provides only entries belonging to the selected distribution. It does not browse or scan the internet while handling a request.
+`backend/sources.json` is a static registry of short descriptions and official URLs for `arch`, `debian`, `fedora`, `nixos`, and `cachyos`. The `/analyze` endpoint provides only entries belonging to the selected distribution. It does not browse or scan the internet while handling a request.
 
 Sources returned by the model are restricted to URLs present in the registry for that distribution. An unknown distribution receives no source context. The registry does not replace current documentation or the user's review of a suggested command.
 
-## Accounts and AI history
+## Supabase account deletion
 
-The backend stores accounts, sessions, and history as JSON files in `backend/data/`. Git ignores this directory. Registration and login return a session token that must be sent as `Authorization: Bearer <token>`.
+The mobile app uses Supabase Auth and stores signed-in analysis history directly in the `analysis_history` table protected by row-level security. The backend needs server credentials only so the in-app **Delete account** action can remove the authenticated Supabase user.
+
+Set these environment variables only on the backend host:
+
+```powershell
+$env:SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co"
+$env:SUPABASE_SECRET_KEY = "YOUR_SECRET_KEY"
+npm.cmd run backend
+```
+
+Never use `SUPABASE_SECRET_KEY` in the Expo app, `app.json`, an `EXPO_PUBLIC_` variable, or a public repository. The backend verifies the user's bearer token with Supabase before performing an administrative deletion. Deleting an Auth user also deletes that user's history through the database foreign key.
+
+For local development on the configured Windows machine, `scripts/start-backend.ps1 -Restart` can start the backend with the server-only key fetched at runtime from the authenticated Supabase CLI. It requires an active Supabase CLI login and does not write the key to the repository.
+
+## Legacy beta accounts
+
+The old `/auth/*` and `/history` routes remain temporarily available so previously built beta APKs do not break immediately. They store accounts, sessions, and history as JSON files in `backend/data/`; Git ignores this directory. New builds do not use these routes.
 
 Registration:
 
@@ -87,7 +104,7 @@ Invoke-RestMethod -Uri http://127.0.0.1:8787/history -Method Post -Headers $head
 
 Passwords are stored using keys derived with `crypto.scrypt`. Session tokens are random, and the backend stores only their hashes. Restarting version 0.2.2 revokes sessions created by older versions that stored raw tokens.
 
-The backend rate-limits registration, login, and AI analysis and permits no more than two concurrent analyses. This remains a simple local persistence layer. Before a wider public release, deploy stable HTTPS, Cloudflare WAF or Turnstile, backups, and a production database. Protect `backend/data/` because it contains account data and conversation history.
+The backend rate-limits registration, login, and AI analysis and permits no more than two concurrent analyses. The legacy store should be removed after old beta builds are retired. Before a wider public release, deploy stable HTTPS, Cloudflare WAF or Turnstile, and durable rate limiting. Protect `backend/data/` while legacy accounts remain there.
 
 ## Phone and internet access
 

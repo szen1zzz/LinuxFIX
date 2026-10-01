@@ -1,34 +1,47 @@
 import { StatusBar } from 'expo-status-bar';
+import { QuietHome } from './components/QuietHome';
+import { DesignHome, type DesignMode } from './components/DesignHome';
+import { DeveloperPanel } from './components/DeveloperPanel';
+import { WorkspaceChrome } from './components/WorkspaceChrome';
+import { createWorkspaceStyles, getWorkspacePalette } from './lib/workspaceDesign';
+import { getDeveloperAccess, type DeveloperGrant } from './lib/developerAccess';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/600SemiBold';
 import { VT323_400Regular } from '@expo-google-fonts/vt323/400Regular';
 import { type AudioPlayer, useAudioPlayer } from 'expo-audio';
 import { useFonts } from 'expo-font';
 import * as Haptics from 'expo-haptics';
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Svg, { Circle, Path, Polygon } from 'react-native-svg';
 import {
   Animated,
+  AppState,
   BackHandler,
   Image,
+  type ImageSourcePropType,
   Linking,
+  PanResponder,
   Platform,
-  Pressable,
+  Pressable as NativePressable,
+  type PressableProps,
   SafeAreaView,
   ScrollView,
   StatusBar as NativeStatusBar,
   StyleSheet,
+  type StyleProp,
   Text as NativeText,
   type TextInputProps,
   TextInput as NativeTextInput,
   type TextProps,
   View,
+  type ViewStyle,
 } from 'react-native';
 import { debianExampleError, errorDatabase, exampleError, type ErrorRule } from './data/errorDatabase';
 import { localizedCategory, localizedFix } from './data/errorDatabaseTranslations';
 import { legalDocuments, type LegalDocumentId } from './data/legalContent';
+import { supabase, supabaseConfigured } from './lib/supabase';
 
-type Distro = 'arch' | 'debian';
+type Distro = 'arch' | 'debian' | 'fedora' | 'nixos' | 'cachyos';
 type WorkspaceTarget = Distro | 'ui';
 type AiStep = { description: string; command: string; risk: 'low' | 'medium' | 'high' };
 type AiResult = {
@@ -43,6 +56,10 @@ type Language = 'pl' | 'en';
 type ThemeMode = 'dark' | 'light';
 type ColorTheme = 'basic' | 'rgb' | 'pinkNeon' | 'medievalAutumn';
 type FontTheme = 'system' | 'terminal' | 'elegant';
+type UpcomingDistribution = {
+  name: string;
+  logo: ImageSourcePropType;
+};
 type UiPalette = {
   background: string;
   surface: string;
@@ -79,9 +96,16 @@ const DEFAULT_BACKEND_URL = '';
 const PRIVACY_CONSENT_KEY = 'linuxfix.privacy-consent';
 const PRIVACY_CONSENT_VERSION = '2026-09-30';
 const COLOR_THEME_KEY = 'linuxfix.color-theme';
+const DESIGN_MODE_KEY = 'linuxfix.developer-design-mode';
 const SOUND_ENABLED_KEY = 'linuxfix.sound-enabled';
 const EFFECTS_ENABLED_KEY = 'linuxfix.effects-enabled';
+const TILE_MOTION_ENABLED_KEY = 'linuxfix.tile-motion-enabled';
 const FONT_THEME_KEY = 'linuxfix.font-theme';
+const ACCOUNT_SESSION_STARTED_KEY = 'linuxfix.account-session-started';
+const ACCOUNT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const USERNAME_PATTERN = /^[a-z0-9_]{3,24}$/;
+const USERNAME_AUTH_DOMAIN = 'login.linuxfix.invalid';
+const MINIMUM_PASSWORD_LENGTH = 12;
 const AI_ANALYSIS_TIMEOUT_MS = 100_000;
 const AI_HEALTH_TIMEOUT_MS = 4_000;
 const AI_HEALTH_INTERVAL_MS = 15_000;
@@ -93,6 +117,63 @@ const AI_TYPING_COMMA_PAUSE_MS = 112;
 const AI_TYPING_SENTENCE_PAUSE_MS = 190;
 const AI_TYPING_HAPTIC_INTERVAL_CHARS = 18;
 const AI_CAMERA_FOLLOW_CHARS = 18;
+
+const normalizedAccountIdentifier = (value: string) => value.trim().toLowerCase();
+
+const accountEmailFromIdentifier = (value: string) => {
+  const identifier = normalizedAccountIdentifier(value);
+  return identifier.includes('@') ? identifier : `${identifier}@${USERNAME_AUTH_DOMAIN}`;
+};
+
+const UPCOMING_DISTRIBUTIONS: UpcomingDistribution[] = [
+  {
+    name: 'Ubuntu',
+    logo: require('./assets/linuxfix-ubuntu-user.jpg'),
+  },
+  {
+    name: 'Tails OS',
+    logo: require('./assets/linuxfix-tails-user.jpg'),
+  },
+];
+
+const DISTRO_LOGOS: Record<Distro, ImageSourcePropType> = {
+  arch: require('./assets/linuxfix-arch-icon.jpg'),
+  debian: require('./assets/linuxfix-debian-icon.jpg'),
+  fedora: require('./assets/linuxfix-fedora-icon.jpg'),
+  nixos: require('./assets/linuxfix-nixos-user.jpg'),
+  cachyos: require('./assets/linuxfix-cachyos-user.jpg'),
+};
+
+const DISTRO_WORKSPACE_COPY: Record<Distro, { en: string; pl: string }> = {
+  arch: {
+    pl: 'Pacman, systemd i ArchWiki w jednym miejscu.',
+    en: 'Pacman, systemd, and ArchWiki in one workspace.',
+  },
+  debian: {
+    pl: 'APT, usługi systemowe i stabilna diagnostyka.',
+    en: 'APT, system services, and stable diagnostics.',
+  },
+  fedora: {
+    pl: 'DNF, RPM, SELinux i diagnostyka systemd.',
+    en: 'DNF, RPM, SELinux, and systemd diagnostics.',
+  },
+  nixos: {
+    pl: 'Konfiguracja deklaratywna, Nix i bezpieczne przebudowy systemu.',
+    en: 'Declarative configuration, Nix, and safe system rebuilds.',
+  },
+  cachyos: {
+    pl: 'Pacman, kerneli CachyOS, mirrory i wydajność systemu.',
+    en: 'Pacman, CachyOS kernels, mirrors, and system performance.',
+  },
+};
+
+const DISTRO_EXAMPLES: Record<Distro, string> = {
+  arch: exampleError,
+  debian: debianExampleError,
+  fedora: 'Error: Unable to find a match: example-package',
+  nixos: "error: attribute 'example-package' missing",
+  cachyos: 'error: signature from key is unknown trust\nerror: failed to commit transaction',
+};
 
 const aiResultTextLength = (result: AiResult) => [
   result.title,
@@ -146,10 +227,98 @@ function TextInput({ style, ...props }: TextInputProps) {
   return <NativeTextInput {...props} style={[style, fontOverride]} />;
 }
 
+function Pressable({ disabled, style, ...props }: PressableProps) {
+  return (
+    <NativePressable
+      {...props}
+      disabled={disabled}
+      style={(state) => [
+        typeof style === 'function' ? style(state) : style,
+        state.pressed && !disabled
+          ? { opacity: 0.94, transform: [{ translateY: -2 }, { scale: 1.012 }] }
+          : undefined,
+      ]}
+    />
+  );
+}
+
+function MagneticTile({ children, enabled, style }: { children: ReactNode; enabled: boolean; style?: StyleProp<ViewStyle> }) {
+  const motion = useRef(new Animated.ValueXY()).current;
+  const focus = useRef(new Animated.Value(0)).current;
+
+  const reset = () => {
+    motion.stopAnimation();
+    focus.stopAnimation();
+    Animated.parallel([
+      Animated.spring(motion, {
+        bounciness: 2,
+        speed: 30,
+        toValue: { x: 0, y: 0 },
+        useNativeDriver: false,
+      }),
+      Animated.spring(focus, {
+        bounciness: 1,
+        speed: 32,
+        toValue: 0,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  };
+
+  const responder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => enabled
+      && Math.hypot(gesture.dx, gesture.dy) > 3
+      && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.8,
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => enabled
+      && Math.hypot(gesture.dx, gesture.dy) > 3
+      && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.8,
+    onPanResponderGrant: () => {
+      motion.stopAnimation();
+      focus.stopAnimation();
+    },
+    onPanResponderMove: (_event, gesture) => {
+      const intensity = Math.min(1, Math.hypot(gesture.dx, gesture.dy) / 54);
+      motion.setValue({
+        x: Math.max(-8, Math.min(8, gesture.dx * 0.09)),
+        y: -2 - intensity * 5,
+      });
+      focus.setValue(intensity);
+    },
+    onPanResponderRelease: reset,
+    onPanResponderTerminate: reset,
+    onPanResponderTerminationRequest: () => true,
+    onStartShouldSetPanResponder: () => false,
+  }), [enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      motion.setValue({ x: 0, y: 0 });
+      focus.setValue(0);
+    }
+  }, [enabled, focus, motion]);
+
+  return (
+    <Animated.View
+      {...responder.panHandlers}
+      style={[
+        style,
+        {
+          transform: [
+            ...motion.getTranslateTransform(),
+            { scale: focus.interpolate({ inputRange: [0, 1], outputRange: [1, 1.018] }) },
+          ],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 const uiPalettes: Record<ColorTheme, UiPalette> = {
   basic: {
-    background: '#031725', surface: '#022E5B', inset: '#031725', accent: '#499BED',
-    muted: '#A1C6F6', text: '#DAEAFF', hot: '#DAEAFF', onAccent: '#031725',
+    background: '#101C24', surface: '#1B2C37', inset: '#101C24', accent: '#82B6D9',
+    muted: '#B6C7D1', text: '#EDF3F5', hot: '#EDF3F5', onAccent: '#101C24',
   },
   rgb: {
     background: '#05040A', surface: '#0B0D18', inset: '#090312', accent: '#00F5FF',
@@ -324,6 +493,27 @@ const themes = {
     label: 'DEBIAN',
     description: 'Ten sam silnik naprawy w pomarańczowo-czerwonym motywie.',
   },
+  fedora: {
+    accent: '#A1C6F6',
+    soft: '#DAEAFF',
+    border: '#499BED',
+    label: 'FEDORA',
+    description: 'DNF, RPM, SELinux i systemd.',
+  },
+  nixos: {
+    accent: '#A1C6F6',
+    soft: '#DAEAFF',
+    border: '#499BED',
+    label: 'NIXOS',
+    description: 'Nix, konfiguracja deklaratywna i rebuildy.',
+  },
+  cachyos: {
+    accent: '#499BED',
+    soft: '#DAEAFF',
+    border: '#A1C6F6',
+    label: 'CACHYOS',
+    description: 'Pacman, zoptymalizowane repozytoria i kerneli.',
+  },
 } as const;
 
 export default function App() {
@@ -338,18 +528,30 @@ export default function App() {
   const [fontTheme, setFontTheme] = useState<FontTheme>('system');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [effectsEnabled, setEffectsEnabled] = useState(true);
+  const [tileMotionEnabled, setTileMotionEnabled] = useState(true);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSystemSettings, setShowSystemSettings] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [accountMode, setAccountMode] = useState<'login' | 'register'>('login');
-  const [accountEmail, setAccountEmail] = useState('');
+  const [accountIdentifier, setAccountIdentifier] = useState('');
   const [accountPassword, setAccountPassword] = useState('');
+  const [newAccountPassword, setNewAccountPassword] = useState('');
   const [accountToken, setAccountToken] = useState('');
+  const [accountUserId, setAccountUserId] = useState('');
   const [accountError, setAccountError] = useState('');
+  const [accountNotice, setAccountNotice] = useState('');
   const [accountLoading, setAccountLoading] = useState(false);
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
+  const [developerGrant, setDeveloperGrant] = useState<DeveloperGrant | null>(null);
+  const developerAccess = getDeveloperAccess(developerGrant, accountUserId);
+  const [showDeveloperPanel, setShowDeveloperPanel] = useState(false);
+  const [designMode, setDesignMode] = useState<DesignMode>('current');
+  const [devSlowTyping, setDevSlowTyping] = useState(false);
+  const [devGodMode, setDevGodMode] = useState(false);
+  const [devInstantAiReveal, setDevInstantAiReveal] = useState(false);
+  const [devOfflinePreview, setDevOfflinePreview] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [privacyConsent, setPrivacyConsent] = useState(false);
   const [showPrivacyConsent, setShowPrivacyConsent] = useState(false);
@@ -370,6 +572,10 @@ export default function App() {
   const rgbMotionCycle = useRef(new Animated.Value(0)).current;
   const distroLoadingRotation = useRef(new Animated.Value(0)).current;
   const tileCrumble = useRef(new Animated.Value(0)).current;
+  const distroIconMotion = useRef(UPCOMING_DISTRIBUTIONS.map(() => new Animated.ValueXY())).current;
+  const distroIconFocus = useRef(UPCOMING_DISTRIBUTIONS.map(() => new Animated.Value(0))).current;
+  const distroIconRailSize = useRef({ height: 1, width: 1 });
+  const distroIconTouchStart = useRef({ x: 0, y: 0 });
   const shatterScatter = useRef(GLASS_PIECES.map(({ x, y, rotate }) => ({ x, y, rotate })));
   const bootSoundPlayed = useRef(false);
   const previousAiStatus = useRef<AiStatus>('checking');
@@ -399,32 +605,30 @@ export default function App() {
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [showHostSettings, setShowHostSettings] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiStatus>('checking');
-  const activePalette = uiPalettes[colorTheme];
-  const customThemeEnabled = colorTheme !== 'basic';
-  const rgbEnabled = colorTheme === 'rgb';
+  const selectedDesignMode = developerAccess ? designMode : 'current';
+  const activePalette = getWorkspacePalette(selectedDesignMode, themeMode === 'light', uiPalettes[colorTheme]);
+  const workspaceStyles = useMemo(() => createWorkspaceStyles(selectedDesignMode, activePalette), [selectedDesignMode, activePalette]);
+  const customThemeEnabled = colorTheme !== 'basic' || selectedDesignMode !== 'current';
+  const rgbEnabled = selectedDesignMode === 'current' && colorTheme === 'rgb';
   const customThemeDark = customThemeEnabled && themeMode === 'dark';
   const aiPanelVisible = aiLoading || aiResult !== null;
-  const aiPanelColors = themeMode === 'light' && !customThemeEnabled
-    ? {
-        background: '#DAEAFF',
-        inset: '#A1C6F6',
-        accent: '#022E5B',
-        muted: '#022E5B',
-        text: '#031725',
-        onAccent: '#DAEAFF',
-      }
-    : activePalette;
+  const aiPanelColors = activePalette;
   const selectedFontFamily = fontsLoaded
     ? fontTheme === 'terminal'
       ? 'LinuxFIXTerminal'
       : fontTheme === 'elegant'
         ? 'LinuxFIXElegant'
-        : undefined
+        : selectedDesignMode === 'classic'
+          ? 'LinuxFIXTerminal'
+          : selectedDesignMode === 'atelier'
+            ? 'LinuxFIXElegant'
+            : undefined
     : undefined;
   const analysisHistoryCount = useMemo(
     () => history.filter((item) => item.role === 'user').length,
     [history],
   );
+  const tileMotionActive = effectsEnabled && tileMotionEnabled;
   const uiTileRenderKey = [
     'ui-tile',
     crumblingWorkspace === 'ui' ? 'crumbling' : 'idle',
@@ -434,6 +638,7 @@ export default function App() {
     colorTheme,
     fontTheme,
     effectsEnabled ? 'effects-on' : 'effects-off',
+    tileMotionEnabled ? 'tile-motion-on' : 'tile-motion-off',
     soundEnabled ? 'sound-on' : 'sound-off',
   ].join(':');
   const paletteStyles = useMemo(() => StyleSheet.create({
@@ -530,6 +735,13 @@ export default function App() {
     if (nextValue) playSound(switchPlayer);
   };
 
+  const toggleTileMotion = () => {
+    const nextValue = !tileMotionEnabled;
+    setTileMotionEnabled(nextValue);
+    void AsyncStorage.setItem(TILE_MOTION_ENABLED_KEY, nextValue ? 'true' : 'false');
+    if (nextValue) playSound(switchPlayer);
+  };
+
   useEffect(() => {
     glassPlayer.volume = 0.42;
     glassPlayer.setPlaybackRate(1.55);
@@ -547,7 +759,7 @@ export default function App() {
     }
 
     const totalCharacters = aiResultTextLength(aiResult);
-    if (!effectsEnabled) {
+    if (!effectsEnabled || (developerAccess === 'admin' && devGodMode && devInstantAiReveal)) {
       setAiRevealChars(totalCharacters);
       setAiTyping(false);
       return;
@@ -591,7 +803,7 @@ export default function App() {
           : /\s/.test(currentCharacter)
             ? AI_TYPING_WORD_PAUSE_MS
             : AI_TYPING_BASE_DELAY_MS;
-      typingTimer = setTimeout(revealNextCharacters, typingDelay);
+      typingTimer = setTimeout(revealNextCharacters, typingDelay * (developerAccess && devSlowTyping ? 2.4 : 1));
     };
 
     typingTimer = setTimeout(revealNextCharacters, 220);
@@ -601,7 +813,7 @@ export default function App() {
       if (typingTimer) clearTimeout(typingTimer);
       if (finishScrollTimer) clearTimeout(finishScrollTimer);
     };
-  }, [aiResult, effectsEnabled]);
+  }, [aiResult, developerAccess, devGodMode, devInstantAiReveal, devSlowTyping, effectsEnabled]);
 
   useEffect(() => {
     aiPanelReveal.stopAnimation();
@@ -693,13 +905,17 @@ export default function App() {
       AsyncStorage.getItem(COLOR_THEME_KEY),
       AsyncStorage.getItem(SOUND_ENABLED_KEY),
       AsyncStorage.getItem(EFFECTS_ENABLED_KEY),
+      AsyncStorage.getItem(TILE_MOTION_ENABLED_KEY),
       AsyncStorage.getItem(FONT_THEME_KEY),
-    ]).then(([storedTheme, storedSound, storedEffects, storedFont]) => {
+      AsyncStorage.getItem(DESIGN_MODE_KEY),
+    ]).then(([storedTheme, storedSound, storedEffects, storedTileMotion, storedFont, storedDesignMode]) => {
       if (!active) return;
       if (storedTheme === 'basic' || storedTheme === 'rgb' || storedTheme === 'pinkNeon' || storedTheme === 'medievalAutumn') setColorTheme(storedTheme);
       if (storedSound === 'false') setSoundEnabled(false);
       if (storedEffects === 'false') setEffectsEnabled(false);
+      if (storedTileMotion === 'false') setTileMotionEnabled(false);
       if (storedFont === 'system' || storedFont === 'terminal' || storedFont === 'elegant') setFontTheme(storedFont);
+      if (storedDesignMode === 'classic' || storedDesignMode === 'hyprland' || storedDesignMode === 'mosaic' || storedDesignMode === 'current' || storedDesignMode === 'atelier' || storedDesignMode === 'clarity') setDesignMode(storedDesignMode);
       setPreferencesLoaded(true);
     }).catch(() => {
       if (active) setPreferencesLoaded(true);
@@ -708,6 +924,120 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client) return;
+    let active = true;
+
+    const expireStaleSession = async () => {
+      const startedValue = await AsyncStorage.getItem(ACCOUNT_SESSION_STARTED_KEY);
+      const startedAt = Number(startedValue);
+      if (!Number.isFinite(startedAt) || startedAt <= 0) {
+        await AsyncStorage.setItem(ACCOUNT_SESSION_STARTED_KEY, String(Date.now()));
+        return false;
+      }
+      if (Date.now() - startedAt < ACCOUNT_SESSION_TTL_MS) return false;
+      await client.auth.signOut();
+      await AsyncStorage.removeItem(ACCOUNT_SESSION_STARTED_KEY);
+      return true;
+    };
+
+    void client.auth.getSession().then(async ({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        setAccountError(error.message);
+        return;
+      }
+      if (data.session && await expireStaleSession()) return;
+      setAccountToken(data.session?.access_token ?? '');
+      setAccountUserId(data.session?.user.id ?? '');
+    });
+
+    const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setAccountToken(session?.access_token ?? '');
+      setAccountUserId(session?.user.id ?? '');
+      if (!session) setHistory([]);
+    });
+
+    const appStateListener = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        client.auth.startAutoRefresh();
+        void expireStaleSession();
+      }
+      else client.auth.stopAutoRefresh();
+    });
+    if (AppState.currentState === 'active') client.auth.startAutoRefresh();
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+      appStateListener.remove();
+      client.auth.stopAutoRefresh();
+    };
+  }, []);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !accountUserId) return;
+    let active = true;
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    void client
+      .from('analysis_history')
+      .select('role, content, created_at')
+      .gte('created_at', cutoff)
+      .order('created_at', { ascending: true })
+      .limit(500)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setAccountError(error.message);
+          return;
+        }
+        const restoredHistory = (data ?? []).flatMap((row) => (
+          (row.role === 'user' || row.role === 'assistant') && typeof row.content === 'string'
+            ? [{ role: row.role, content: row.content, createdAt: row.created_at } satisfies HistoryItem]
+            : []
+        ));
+        setHistory(restoredHistory);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [accountUserId]);
+
+  useEffect(() => {
+    const client = supabase;
+    setDeveloperGrant(null);
+    setShowDeveloperPanel(false);
+    setDevGodMode(false);
+    setDevSlowTyping(false);
+    setDevInstantAiReveal(false);
+    setDevOfflinePreview(false);
+    if (!client || !accountUserId) {
+      return;
+    }
+    let active = true;
+    void client
+      .from('developer_access')
+      .select('access_level')
+      .eq('user_id', accountUserId)
+      .eq('enabled', true)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error || (data?.access_level !== 'developer' && data?.access_level !== 'admin')) {
+          setDeveloperGrant(null);
+          setShowDeveloperPanel(false);
+          return;
+        }
+        setDeveloperGrant({ userId: accountUserId, level: data.access_level });
+      });
+    return () => { active = false; };
+  }, [accountUserId]);
 
   useEffect(() => {
     if (!preferencesLoaded || !booting || bootSoundPlayed.current) return;
@@ -871,39 +1201,92 @@ export default function App() {
   }, [distroLoadingRotation, effectsEnabled, pendingWorkspace, whooshPlayer]);
 
   const launchWorkspace = (target: WorkspaceTarget) => {
+    // Unsupported distributions must never open an unfinished workspace.
+    if (target !== 'ui' && target !== 'arch' && target !== 'debian') return;
     if (pendingWorkspace || crumblingWorkspace) return;
     triggerTileHaptic();
 
-    if (!effectsEnabled) {
-      playSound(switchPlayer);
-      if (target === 'ui') setShowSettings(true);
-      else setDistro(target);
+    // Quiet transitions replace the old glass shatter sequence.
+    playSound(switchPlayer);
+    setPendingWorkspace(target);
+    return;
+
+  };
+
+  const resetDistroIconRail = () => {
+    distroIconMotion.forEach((motion, index) => {
+      motion.stopAnimation();
+      distroIconFocus[index].stopAnimation();
+      Animated.spring(motion, {
+        bounciness: 5,
+        speed: 26,
+        toValue: { x: 0, y: 0 },
+        useNativeDriver: false,
+      }).start();
+      Animated.spring(distroIconFocus[index], {
+        bounciness: 3,
+        speed: 28,
+        toValue: 0,
+        useNativeDriver: false,
+      }).start();
+    });
+  };
+
+  const trackDistroIconRail = (locationX: number, locationY: number) => {
+    if (!tileMotionActive) {
+      resetDistroIconRail();
       return;
     }
 
-    playSound(glassPlayer);
-    setTimeout(() => playSound(glassTailPlayer), 48);
-    tileCrumble.stopAnimation();
-    // Mount the crack map at a visible animation value so the first rendered
-    // frame already contains the impact, rather than an empty tile frame.
-    tileCrumble.setValue(0.018);
-    shatterScatter.current = GLASS_PIECES.map(({ x, y, rotate }) => ({
-      x: x + (Math.random() - 0.5) * 7,
-      y: y + (Math.random() - 0.5) * 7,
-      rotate: rotate + (Math.random() - 0.5) * 5,
-    }));
-    setCrumblingWorkspace(target);
-
-    Animated.timing(tileCrumble, {
-      toValue: 1,
-      duration: 720,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (!finished) return;
-      setPendingWorkspace(target);
-      setCrumblingWorkspace(null);
+    const { height, width } = distroIconRailSize.current;
+    const slotWidth = width / Math.max(distroIconMotion.length, 1);
+    distroIconMotion.forEach((motion, index) => {
+      const centerX = slotWidth * (index + 0.5);
+      const centerY = height * 0.46;
+      const dx = locationX - centerX;
+      const dy = locationY - centerY;
+      const influence = Math.max(0, 1 - Math.hypot(dx, dy) / Math.max(slotWidth * 1.55, 84));
+      const followX = Math.max(-18, Math.min(18, dx * 0.24)) * influence;
+      const followY = Math.max(-8, Math.min(8, dy * 0.14)) * influence - 14 * influence;
+      motion.setValue({ x: followX, y: followY });
+      distroIconFocus[index].setValue(influence);
     });
   };
+
+  const distroIconPanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => tileMotionActive
+      && Math.abs(gesture.dx) > 2
+      && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.72,
+    onPanResponderGrant: (event, gesture) => {
+      distroIconMotion.forEach((motion, index) => {
+        motion.stopAnimation();
+        distroIconFocus[index].stopAnimation();
+      });
+      distroIconTouchStart.current = {
+        x: event.nativeEvent.locationX - gesture.dx,
+        y: event.nativeEvent.locationY - gesture.dy,
+      };
+      trackDistroIconRail(event.nativeEvent.locationX, event.nativeEvent.locationY);
+    },
+    onPanResponderMove: (_event, gesture) => {
+      trackDistroIconRail(
+        distroIconTouchStart.current.x + gesture.dx,
+        distroIconTouchStart.current.y + gesture.dy,
+      );
+    },
+    onPanResponderRelease: resetDistroIconRail,
+    onPanResponderTerminate: resetDistroIconRail,
+    onPanResponderTerminationRequest: () => true,
+    onStartShouldSetPanResponder: () => false,
+  }), [tileMotionActive]);
+
+  useEffect(() => {
+    if (tileMotionActive) return;
+    distroIconMotion.forEach((motion, index) => {
+      motion.setValue({ x: 0, y: 0 });
+      distroIconFocus[index].setValue(0);
+    });
+  }, [tileMotionActive]);
 
   const chooseDistro = (nextDistro: Distro) => launchWorkspace(nextDistro);
 
@@ -1236,18 +1619,20 @@ export default function App() {
         throw new Error(language === 'pl' ? 'Backend zwrócił niepełną odpowiedź.' : 'The backend returned an incomplete response.');
       }
       setAiResult(data);
+      const assistantHistoryContent = `${data.title}\n${data.cause}`.slice(0, 20_000);
       const nextHistory: HistoryItem[] = [
         ...history,
         { role: 'user' as const, content: log, createdAt: new Date().toISOString() },
-        { role: 'assistant' as const, content: `${data.title}\n${data.cause}`, createdAt: new Date().toISOString() },
+        { role: 'assistant' as const, content: assistantHistoryContent, createdAt: new Date().toISOString() },
       ].slice(-100);
       setHistory(nextHistory);
-      if (accountToken) {
-        await fetchWithTimeout(`${backendUrl.replace(/\/+$/, '')}/history`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accountToken}` },
-          body: JSON.stringify({ messages: nextHistory }),
-        });
+      if (accountUserId && supabase) {
+        const createdAt = Date.now();
+        const { error: historyError } = await supabase.from('analysis_history').insert([
+          { user_id: accountUserId, distribution: distro, role: 'user', content: log, created_at: new Date(createdAt).toISOString() },
+          { user_id: accountUserId, distribution: distro, role: 'assistant', content: assistantHistoryContent, created_at: new Date(createdAt + 1).toISOString() },
+        ]);
+        if (historyError) setAccountError(historyError.message);
       }
     } catch (error) {
       setAiError(readableError(error, language, 'Nie udało się połączyć z backendem.', 'Could not connect to the backend.'));
@@ -1257,35 +1642,54 @@ export default function App() {
   };
 
   const submitAccount = async () => {
-    if (!backendUrl || aiStatus !== 'online') {
-      setAccountError(language === 'pl' ? 'Backend jest obecnie niedostępny.' : 'The backend is currently unavailable.');
+    if (!supabaseConfigured || !supabase) {
+      setAccountError(language === 'pl' ? 'Supabase nie jest jeszcze skonfigurowany.' : 'Supabase is not configured yet.');
       return;
     }
-    if (!accountEmail.trim() || accountPassword.length < 8) {
-      setAccountError(language === 'pl' ? 'Podaj poprawny e-mail i hasło mające co najmniej 8 znaków.' : 'Enter a valid email and a password with at least 8 characters.');
+    const identifier = normalizedAccountIdentifier(accountIdentifier);
+    const usesEmail = identifier.includes('@');
+    if (!identifier || (!usesEmail && !USERNAME_PATTERN.test(identifier))) {
+      setAccountError(language === 'pl'
+        ? 'Nazwa użytkownika musi mieć 3–24 znaki i może zawierać małe litery, cyfry oraz znak _.'
+        : 'The username must be 3–24 characters and may contain lowercase letters, numbers, and _.');
+      return;
+    }
+    if (!accountPassword) {
+      setAccountError(language === 'pl' ? 'Podaj hasło.' : 'Enter your password.');
+      return;
+    }
+    if (accountMode === 'register' && accountPassword.length < MINIMUM_PASSWORD_LENGTH) {
+      setAccountError(language === 'pl'
+        ? `Hasło musi mieć co najmniej ${MINIMUM_PASSWORD_LENGTH} znaków.`
+        : `The password must contain at least ${MINIMUM_PASSWORD_LENGTH} characters.`);
       return;
     }
     setAccountLoading(true);
     setAccountError('');
+    setAccountNotice('');
     try {
-      const response = await fetchWithTimeout(`${backendUrl.replace(/\/+$/, '')}/auth/${accountMode === 'login' ? 'login' : 'register'}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: accountEmail.trim(), password: accountPassword }),
-      });
-      const data = await readJsonResponse(response) as { error?: string; token?: string };
-      if (!response.ok) throw new Error(responseError(data, response.status));
-      if (typeof data.token !== 'string' || !data.token) throw new Error(language === 'pl' ? 'Backend nie zwrócił tokenu sesji.' : 'The backend did not return a session token.');
-      setAccountToken(data.token);
+      const credentials = { email: accountEmailFromIdentifier(identifier), password: accountPassword };
+      const { data, error } = accountMode === 'login'
+        ? await supabase.auth.signInWithPassword(credentials)
+        : await supabase.auth.signUp({
+          ...credentials,
+          options: usesEmail ? undefined : { data: { username: identifier } },
+        });
+      if (error) throw error;
       setAccountPassword('');
-      const historyResponse = await fetchWithTimeout(`${backendUrl.replace(/\/+$/, '')}/history`, {
-        headers: { Authorization: `Bearer ${data.token}` },
-      });
-      if (historyResponse.ok) {
-        const historyData = await readJsonResponse(historyResponse) as { history?: unknown; messages?: unknown };
-        const savedHistory = historyData.history ?? historyData.messages;
-        setHistory(Array.isArray(savedHistory) ? savedHistory : []);
+      if (!data.session) {
+        setAccountNotice(language === 'pl'
+          ? (usesEmail
+            ? 'Sprawdź skrzynkę e-mail i potwierdź konto, a następnie się zaloguj.'
+            : 'Konto utworzono, ale wymaga zatwierdzenia przez administratora.')
+          : (usesEmail
+            ? 'Check your email, confirm the account, and then sign in.'
+            : 'The account was created but requires administrator approval.'));
+        return;
       }
+      await AsyncStorage.setItem(ACCOUNT_SESSION_STARTED_KEY, String(Date.now()));
+      setAccountToken(data.session.access_token);
+      setAccountUserId(data.session.user.id);
     } catch (error) {
       setAccountError(readableError(error, language, 'Nie udało się obsłużyć konta.', 'The account request failed.'));
     } finally {
@@ -1293,21 +1697,44 @@ export default function App() {
     }
   };
 
+  const changeAccountPassword = async () => {
+    if (!supabase || !accountToken) return;
+    if (newAccountPassword.length < MINIMUM_PASSWORD_LENGTH) {
+      setAccountError(language === 'pl'
+        ? `Nowe hasło musi mieć co najmniej ${MINIMUM_PASSWORD_LENGTH} znaków.`
+        : `The new password must contain at least ${MINIMUM_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    setAccountLoading(true);
+    setAccountError('');
+    setAccountNotice('');
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newAccountPassword });
+      if (error) throw error;
+      setNewAccountPassword('');
+      setAccountNotice(language === 'pl' ? 'Hasło zostało zmienione.' : 'The password has been changed.');
+    } catch (error) {
+      setAccountError(readableError(error, language, 'Nie udało się zmienić hasła.', 'Could not change the password.'));
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
   const logout = async () => {
-    const token = accountToken;
+    if (supabase) {
+      await supabase.auth.signOut().catch(() => undefined);
+    }
+    await AsyncStorage.removeItem(ACCOUNT_SESSION_STARTED_KEY);
     setAccountToken('');
+    setAccountUserId('');
+    setDeveloperGrant(null);
+    setShowDeveloperPanel(false);
+    setDevGodMode(false);
+    setDevInstantAiReveal(false);
+    setDevOfflinePreview(false);
     setHistory([]);
     setConfirmDeleteAccount(false);
     setShowAccount(false);
-    if (!token || !backendUrl) return;
-    try {
-      await fetchWithTimeout(`${backendUrl.replace(/\/+$/, '')}/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }, 8_000);
-    } catch {
-      // The local session is cleared even when the backend cannot be reached.
-    }
   };
 
   const acceptPrivacyConsent = async () => {
@@ -1329,19 +1756,24 @@ export default function App() {
       setConfirmDeleteAccount(true);
       return;
     }
-    if (!accountToken || !backendUrl) return;
+    if (!accountToken || !supabase) return;
     setAccountLoading(true);
     setAccountError('');
     try {
-      const response = await fetchWithTimeout(`${backendUrl.replace(/\/+$/, '')}/account`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${accountToken}` },
-      });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw new Error(responseError(payload, response.status));
+      const { error } = await supabase.functions.invoke('delete-account');
+      if (error) throw error;
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+      await AsyncStorage.removeItem(ACCOUNT_SESSION_STARTED_KEY);
       setAccountToken('');
+      setAccountUserId('');
+      setDeveloperGrant(null);
+      setShowDeveloperPanel(false);
+      setDevGodMode(false);
+      setDevInstantAiReveal(false);
+      setDevOfflinePreview(false);
       setHistory([]);
-      setAccountEmail('');
+      setAccountIdentifier('');
+      setNewAccountPassword('');
       setShowAccount(false);
       setConfirmDeleteAccount(false);
     } catch (error) {
@@ -1349,6 +1781,31 @@ export default function App() {
     } finally {
       setAccountLoading(false);
     }
+  };
+
+  const openDeveloperTestPrompt = () => {
+    setProblem(language === 'pl'
+      ? 'Wyjaśnij, jak bezpiecznie sprawdzić nieudaną usługę systemd i jej logi.'
+      : 'Explain how to safely inspect a failed systemd service and its logs.');
+    setResult(null);
+    setSuggestions([]);
+    setSearched(false);
+    setAiResult(null);
+    setAiError('');
+    setShowDeveloperPanel(false);
+    if (!distro) setDistro('arch');
+  };
+
+  const resetDeveloperAnalysis = () => {
+    setProblem('');
+    setResult(null);
+    setSuggestions([]);
+    setSearched(false);
+    setAiResult(null);
+    setAiRevealChars(0);
+    setAiTyping(false);
+    setAiLoading(false);
+    setAiError('');
   };
 
   const legalOverlays = (
@@ -1389,6 +1846,40 @@ export default function App() {
           </View>
         </View>
       )}
+      <DeveloperPanel
+        visible={showDeveloperPanel}
+        language={language}
+        accessLevel={developerAccess}
+        userId={accountUserId}
+        aiStatus={devOfflinePreview ? 'offline' : aiStatus}
+        backendUrl={backendUrl}
+        slowTyping={devSlowTyping}
+        godMode={devGodMode}
+        instantAiReveal={devInstantAiReveal}
+        offlinePreview={devOfflinePreview}
+        partyThemeActive={colorTheme === 'rgb'}
+        designMode={selectedDesignMode}
+        fontFamily={selectedFontFamily}
+        onClose={() => setShowDeveloperPanel(false)}
+        onToggleSlowTyping={() => setDevSlowTyping((value) => !value)}
+        onToggleGodMode={() => setDevGodMode((value) => !value)}
+        onToggleInstantAiReveal={() => setDevInstantAiReveal((value) => !value)}
+        onToggleOfflinePreview={() => setDevOfflinePreview((value) => !value)}
+        onTogglePartyTheme={() => selectColorTheme(colorTheme === 'rgb' ? 'basic' : 'rgb')}
+        onRefreshAi={() => void checkAiStatus(true)}
+        onSelectDesign={(mode) => {
+          if (!developerAccess) return;
+          setDesignMode(mode);
+          void AsyncStorage.setItem(DESIGN_MODE_KEY, mode);
+          setShowDeveloperPanel(false);
+          if (distro) clearWorkspace();
+        }}
+        onTestHaptic={() => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)}
+        onTestSound={() => playSound(switchPlayer, true)}
+        onInsertTestPrompt={openDeveloperTestPrompt}
+        onResetAnalysis={resetDeveloperAnalysis}
+        onOpenHostSettings={() => { setShowDeveloperPanel(false); setShowHostSettings(true); if (!distro) setDistro('arch'); }}
+      />
     </>
   );
 
@@ -1399,7 +1890,7 @@ export default function App() {
   };
 
   const insertExample = () => {
-    const selectedExample = distro === 'debian' ? debianExampleError : exampleError;
+    const selectedExample = DISTRO_EXAMPLES[distro ?? 'arch'];
     const found = rulesForDistro(distro).find(({ match }) => match.test(selectedExample)) ?? null;
     setProblem(selectedExample);
     setResult(found);
@@ -1549,211 +2040,23 @@ export default function App() {
   if (!distro) {
     return (
       <FontFamilyContext.Provider value={selectedFontFamily}>
-        <SafeAreaView style={[styles.menuSurface, themeMode === 'light' && styles.menuSurfaceLight, customThemeDark && paletteStyles.root]}>
-        <ScrollView
-          contentContainerStyle={styles.menuContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          <Animated.View
-            style={[
-              styles.hyprPanel,
-              themeMode === 'light' && styles.hyprPanelLight,
-              customThemeDark && paletteStyles.panel,
-              {
-                marginTop: Platform.OS === 'android' ? (NativeStatusBar.currentHeight ?? 24) + 16 : 16,
-                opacity: menuReveal,
-                transform: [{ translateY: menuReveal.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] }) }],
-              },
-            ]}
-          >
-            <View style={styles.hyprBrand}>
-              <Image source={require('./assets/linuxfix-logo.jpg')} style={styles.hyprLogo} />
-              <View>
-                <Text style={[styles.hyprBrandName, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>LinuxFIX</Text>
-                <Text style={[styles.hyprBrandVersion, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>PRIVATE BETA 0.2.2</Text>
-              </View>
-            </View>
-            <View style={styles.hyprWorkspaces}>
-              <View style={styles.hyprWorkspaceActive}>
-                <Text style={styles.hyprWorkspaceActiveText}>01</Text>
-                <Animated.View style={[styles.hyprWorkspacePulse, { opacity: menuActivity.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] }), transform: [{ scaleX: menuActivity.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }) }] }]} />
-              </View>
-              <Text style={[styles.hyprWorkspace, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>02</Text>
-              <Text style={[styles.hyprWorkspace, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>03</Text>
-            </View>
-            <View style={styles.hyprStatus}>
-              <Animated.View style={[styles.hyprStatusDot, { opacity: menuActivity.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }]} />
-              <Text style={[styles.hyprStatusText, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>READY</Text>
-            </View>
-            {rgbEnabled && <Animated.View pointerEvents="none" style={[styles.rgbPanelSignal, { backgroundColor: animatedRgbColor }]} />}
-          </Animated.View>
-
-          <Animated.View
-            style={[
-              styles.hyprHeroWindow,
-              themeMode === 'light' && styles.hyprWindowLight,
-              customThemeDark && paletteStyles.panel,
-              {
-                opacity: menuReveal.interpolate({ inputRange: [0, 0.22, 1], outputRange: [0, 0, 1] }),
-                transform: [{ translateY: menuReveal.interpolate({ inputRange: [0, 1], outputRange: [34, 0] }) }],
-              },
-            ]}
-          >
-            <View style={[styles.hyprWindowBar, themeMode === 'light' && styles.hyprWindowBarLight, customThemeEnabled && paletteStyles.bar]}>
-              <Text style={[styles.hyprWindowPath, themeMode === 'light' && styles.lightText]}>linuxfix@mobile:~</Text>
-              <Text style={[styles.hyprWindowMeta, themeMode === 'light' && styles.lightText]}>WORKSPACE 01</Text>
-            </View>
-            {rgbEnabled && (
-              <View style={styles.rgbSpectrum}>
-                <View style={[styles.rgbSpectrumSegment, { backgroundColor: '#00F5FF' }]} />
-                <View style={[styles.rgbSpectrumSegment, { backgroundColor: '#6DFF3A' }]} />
-                <View style={[styles.rgbSpectrumSegment, { backgroundColor: '#FF2FD1' }]} />
-                {renderRgbRunner()}
-              </View>
-            )}
-            <View style={styles.hyprHeroBody}>
-              <Text style={[styles.hyprPrompt, customThemeDark && paletteStyles.accentText]}>$ diagnose --interactive</Text>
-              <Text style={[styles.menuTitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>
-                {language === 'pl' ? 'Napraw system.\nZrozum przyczynę.' : 'Fix the system.\nUnderstand the cause.'}
-              </Text>
-              <Text style={[styles.menuSubtitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>
-                {language === 'pl'
-                  ? 'Wybierz dystrybucję, opisz cel albo wklej błąd. Otrzymasz konkretne kroki, komendy i źródła.'
-                : 'Choose a distribution, describe the goal, or paste an error. Get concrete steps, commands, and sources.'}
-              </Text>
-            </View>
-            {renderRgbGlow(0)}
-          </Animated.View>
-
-          <Animated.View
-            style={{
-              opacity: menuReveal.interpolate({ inputRange: [0, 0.42, 1], outputRange: [0, 0, 1] }),
-              transform: [{ translateY: menuReveal.interpolate({ inputRange: [0, 1], outputRange: [42, 0] }) }],
-            }}
-          >
-            <View style={styles.menuSectionHeader}>
-              <View>
-                <Text style={[styles.hyprSectionIndex, customThemeDark && paletteStyles.accentText]}>01 / DISTRIBUTIONS</Text>
-                <Text style={[styles.menuSectionTitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{copy.choose}</Text>
-              </View>
-            </View>
-
-            <View style={styles.crumbleTileShell}>
-              <Animated.View key={uiTileRenderKey} style={crumbleTileStyle('ui')}>
-                <Pressable
-                  disabled={!!pendingWorkspace || !!crumblingWorkspace}
-                  onPressIn={openUiWorkspace}
-                  onPress={openUiWorkspace}
-                  style={({ pressed }) => [styles.uiWorkspaceTile, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel, pressed && styles.hyprWindowPressed]}
-                >
-                  <View style={styles.uiWorkspaceHeader}>
-                    <View>
-                      <Text style={[styles.hyprWindowPath, customThemeDark && paletteStyles.accentText]}>00 / UI</Text>
-                      <Text style={[styles.uiWorkspaceTitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'Wygląd i język' : 'Appearance and language'}</Text>
-                    </View>
-                    <Text style={[styles.uiWorkspaceGlyph, customThemeDark && paletteStyles.hotText]}>Aa</Text>
-                  </View>
-                  <View style={[styles.uiWorkspaceFooter, customThemeEnabled && paletteStyles.border]}>
-                    <Text style={[styles.uiWorkspaceMeta, customThemeDark && paletteStyles.mutedText]}>{language === 'pl' ? 'MOTYW  /  KOLORY  /  JĘZYK  /  CZCIONKA' : 'THEME  /  COLORS  /  LANGUAGE  /  FONT'}</Text>
-                    <Text style={[styles.hyprActionArrow, customThemeDark && paletteStyles.text]}>→</Text>
-                  </View>
-                </Pressable>
-              </Animated.View>
-              {renderRgbGlow(12)}
-              {renderTileCrumble('ui')}
-            </View>
-
-            <View style={styles.crumbleTileShell}>
-              <Animated.View style={crumbleTileStyle('arch')}>
-                <Pressable
-                  disabled={!!pendingWorkspace || !!crumblingWorkspace}
-                  onPressIn={() => chooseDistro('arch')}
-                  onPress={() => chooseDistro('arch')}
-                  style={({ pressed }) => [styles.hyprPrimaryWindow, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel, pressed && styles.hyprWindowPressed]}
-                >
-                  <View style={[styles.hyprWindowBar, customThemeEnabled && paletteStyles.bar]}>
-                    <Text style={[styles.hyprWindowPath, themeMode === 'light' && styles.lightText]}>01 / ARCH LINUX</Text>
-                    <Text style={[styles.hyprWindowMeta, themeMode === 'light' && styles.lightText]}>PACMAN + SYSTEMD</Text>
-                  </View>
-                  {rgbEnabled && (
-                    <View style={styles.rgbSpectrum}>
-                      <View style={[styles.rgbSpectrumSegment, { backgroundColor: '#FF2FD1' }]} />
-                      <View style={[styles.rgbSpectrumSegment, { backgroundColor: '#00F5FF' }]} />
-                      <View style={[styles.rgbSpectrumSegment, { backgroundColor: '#6DFF3A' }]} />
-                      {renderRgbRunner(true)}
-                    </View>
-                  )}
-                  <View style={styles.hyprDistroBody}>
-                    <View style={styles.hyprDistroCopy}>
-                      <Text style={[styles.hyprDistroTitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>Arch Linux</Text>
-                      <Text style={[styles.hyprDistroDescription, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>{language === 'pl' ? 'Diagnostyka dla Pacmana, systemd i codziennych problemów z Archem.' : 'Diagnostics for Pacman, systemd, and everyday Arch issues.'}</Text>
-                    </View>
-                    <Image source={require('./assets/linuxfix-arch-icon.jpg')} style={styles.hyprDistroLogo} />
-                  </View>
-                  <View style={[styles.hyprActionLine, themeMode === 'light' && styles.hyprActionLineLight, customThemeEnabled && paletteStyles.border]}>
-                    <Text style={[styles.hyprActionText, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'OTWÓRZ WORKSPACE' : 'OPEN WORKSPACE'}</Text>
-                    <Text style={[styles.hyprActionArrow, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>→</Text>
-                  </View>
-                </Pressable>
-              </Animated.View>
-              {renderRgbGlow(12)}
-              {renderTileCrumble('arch')}
-            </View>
-
-            <View style={styles.hyprSplit}>
-              <View style={[styles.crumbleTileShell, styles.crumbleTileShellSplit]}>
-                <Animated.View style={[styles.crumbleTileFill, crumbleTileStyle('debian')]}>
-                  <Pressable
-                    disabled={!!pendingWorkspace || !!crumblingWorkspace}
-                    onPressIn={() => chooseDistro('debian')}
-                    onPress={() => chooseDistro('debian')}
-                    style={({ pressed }) => [styles.hyprSecondaryWindow, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel, pressed && styles.hyprWindowPressed]}
-                  >
-                    <View style={styles.hyprSecondaryHeader}>
-                      <Text style={[styles.hyprWindowPath, themeMode === 'light' && styles.lightText]}>02 / DEBIAN</Text>
-                      <Image source={require('./assets/linuxfix-debian-icon.jpg')} style={styles.hyprSmallLogo} />
-                    </View>
-                    <Text style={[styles.hyprSecondaryTitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>Debian</Text>
-                    <Text style={[styles.hyprSecondaryDescription, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>{language === 'pl' ? 'APT i stabilne środowiska' : 'APT and stable systems'}</Text>
-                    <Text style={[styles.hyprSecondaryAction, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.accentText]}>{language === 'pl' ? 'URUCHOM  →' : 'LAUNCH  →'}</Text>
-                  </Pressable>
-                </Animated.View>
-                {renderRgbGlow(12)}
-                {renderTileCrumble('debian')}
-              </View>
-
-              <View style={[styles.hyprSecondaryWindow, styles.hyprDisabledWindow, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel]}>
-                <View style={styles.hyprSecondaryHeader}>
-                  <Text style={[styles.hyprWindowPath, themeMode === 'light' && styles.lightText]}>03 / FEDORA INCOMING</Text>
-                  <Image source={require('./assets/linuxfix-fedora-icon.jpg')} style={[styles.hyprSmallLogo, styles.hyprDisabledLogo]} />
-                </View>
-                <Text style={[styles.hyprSecondaryTitle, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>Fedora</Text>
-                <Text style={[styles.hyprSecondaryDescription, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>{language === 'pl' ? 'Workspace w przygotowaniu' : 'Workspace in development'}</Text>
-                <Text style={[styles.hyprComingSoon, customThemeDark && paletteStyles.hotText]}>{language === 'pl' ? 'WKRÓTCE' : 'SOON'}</Text>
-              </View>
-            </View>
-
-            <View style={[styles.hyprDock, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel]}>
-              <Pressable onPress={() => setShowHistory(true)} style={({ pressed }) => [styles.hyprDockCommand, pressed && styles.buttonPressed]}>
-                <Text style={styles.hyprDockIndex}>01</Text>
-                <Text style={[styles.hyprDockLabel, themeMode === 'light' && styles.lightText]}>{language === 'pl' ? 'HISTORIA' : 'HISTORY'}</Text>
-                {analysisHistoryCount > 0 && <Text style={styles.hyprDockValue}>{analysisHistoryCount}</Text>}
-              </Pressable>
-              <View style={[styles.hyprDockDivider, customThemeEnabled && paletteStyles.bar]} />
-              <Pressable onPress={() => setShowSystemSettings(true)} style={({ pressed }) => [styles.hyprDockCommand, pressed && styles.buttonPressed]}>
-                <Text style={styles.hyprDockIndex}>02</Text>
-                <Text style={[styles.hyprDockLabel, themeMode === 'light' && styles.lightText]}>{language === 'pl' ? 'USTAWIENIA' : 'SETTINGS'}</Text>
-              </Pressable>
-              {renderRgbGlow(0)}
-            </View>
-
-            <View style={styles.menuTrustRow}>
-              <View style={styles.menuTrustItem}><View style={styles.trustDot} /><Text style={[styles.menuTrustText, themeMode === 'light' && styles.lightText]}>{language === 'pl' ? 'Komendy nie uruchamiają się automatycznie' : 'Commands never run automatically'}</Text></View>
-              <Text style={styles.menuTrustDivider}>/</Text>
-              <Text style={[styles.menuTrustText, themeMode === 'light' && styles.lightText]}>{language === 'pl' ? 'Źródła pod kontrolą' : 'Curated sources'}</Text>
-            </View>
-          </Animated.View>
-        </ScrollView>
+        <SafeAreaView style={[styles.menuSurface, themeMode === 'light' && styles.menuSurfaceLight, customThemeDark && paletteStyles.root, workspaceStyles.root]}>
+        {selectedDesignMode === 'current' ? <QuietHome
+          language={language} light={themeMode === 'light'} palette={activePalette}
+          fontFamily={selectedFontFamily} motion={effectsEnabled}
+          busy={!!pendingWorkspace || !!crumblingWorkspace} historyCount={analysisHistoryCount}
+          onChoose={chooseDistro} onAppearance={openUiWorkspace}
+          onHistory={() => setShowHistory(true)} onSettings={() => setShowSystemSettings(true)}
+          onAccount={() => setShowAccount(true)}
+        /> : <DesignHome
+          mode={selectedDesignMode}
+          language={language} light={themeMode === 'light'} palette={activePalette}
+          fontFamily={selectedFontFamily} motion={effectsEnabled}
+          busy={!!pendingWorkspace || !!crumblingWorkspace} historyCount={analysisHistoryCount}
+          onChoose={chooseDistro} onAppearance={openUiWorkspace}
+          onHistory={() => setShowHistory(true)} onSettings={() => setShowSystemSettings(true)}
+          onAccount={() => setShowAccount(true)}
+        />}
         {pendingWorkspace && (
           <View style={[styles.distroLoadingOverlay, customThemeDark && paletteStyles.root]}>
             <View pointerEvents="none" style={styles.loadingLogoStage}>
@@ -1780,11 +2083,9 @@ export default function App() {
                 ]}
               />
               <Animated.Image
-                source={pendingWorkspace === 'arch'
-                  ? require('./assets/linuxfix-arch-icon.jpg')
-                  : pendingWorkspace === 'debian'
-                    ? require('./assets/linuxfix-debian-icon.jpg')
-                    : require('./assets/linuxfix-logo.jpg')}
+                source={pendingWorkspace === 'ui'
+                  ? require('./assets/linuxfix-logo.jpg')
+                  : DISTRO_LOGOS[pendingWorkspace]}
                 style={[
                   styles.distroLoadingLogo,
                   {
@@ -1796,7 +2097,7 @@ export default function App() {
                 ]}
               />
             </View>
-            <Text style={styles.distroLoadingTitle}>{pendingWorkspace === 'arch' ? 'ARCH LINUX' : pendingWorkspace === 'debian' ? 'DEBIAN' : 'UI CONFIG'}</Text>
+            <Text style={styles.distroLoadingTitle}>{pendingWorkspace === 'ui' ? 'UI CONFIG' : themes[pendingWorkspace].label}</Text>
             <Text style={styles.distroLoadingText}>{language === 'pl' ? 'ŁADOWANIE WORKSPACE' : 'LOADING WORKSPACE'}</Text>
             <View style={[styles.loadingProgressTrack, { backgroundColor: activePalette.surface }]}>
               <Animated.View style={[styles.loadingProgressFill, { backgroundColor: activePalette.accent, transform: [{ scaleX: distroLoadingRotation }] }]} />
@@ -1825,7 +2126,7 @@ export default function App() {
                 style={styles.settingsScroll}
                 showsVerticalScrollIndicator
               >
-              <Text style={[styles.modalTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'KONFIGURACJA UI' : 'UI CONFIGURATION'}</Text>
+              <Text style={[styles.modalTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'Wygląd i język' : 'Appearance & language'}</Text>
               <Text style={styles.modalLabel}>{language === 'pl' ? 'JĘZYK' : 'LANGUAGE'}</Text>
               <View style={styles.choiceRow}>
                 <Pressable onPress={() => setLanguage('pl')} style={[styles.choice, language === 'pl' && styles.choiceActive]}><Text style={[styles.choiceText, language === 'pl' && styles.choiceTextActive]}>{copy.polish}</Text></Pressable>
@@ -1903,11 +2204,11 @@ export default function App() {
                   <NativeText style={[styles.fontThemeDescription, { fontFamily: 'LinuxFIXElegant' }]}>{language === 'pl' ? 'Klasyczna i premium' : 'Classic and premium'}</NativeText>
                 </Pressable>
               </View>
-              <Text style={styles.modalLabel}>{language === 'pl' ? 'EFEKTY PRZEJŚĆ I SZKŁA' : 'MOTION AND GLASS EFFECTS'}</Text>
+              <Text style={styles.modalLabel}>{language === 'pl' ? 'ANIMACJE INTERFEJSU' : 'INTERFACE ANIMATIONS'}</Text>
               <Pressable onPress={toggleEffects} style={styles.soundSetting}>
                 <View>
                   <Text style={styles.soundSettingTitle}>{effectsEnabled ? (language === 'pl' ? 'WŁĄCZONE' : 'ENABLED') : (language === 'pl' ? 'WYŁĄCZONE' : 'DISABLED')}</Text>
-                  <Text style={styles.soundSettingDescription}>{language === 'pl' ? 'Pękanie kafelków, przejścia, ruch RGB i lekka haptyka' : 'Tile shatter, transitions, RGB motion, and light haptics'}</Text>
+                  <Text style={styles.soundSettingDescription}>{language === 'pl' ? 'Przejścia ekranów, wysuwanie menu i lekka haptyka' : 'Screen transitions, sliding menus, and light haptics'}</Text>
                 </View>
                 <View style={[styles.soundIndicator, effectsEnabled && styles.soundIndicatorActive]}>
                   <View style={[styles.soundIndicatorCore, effectsEnabled && styles.soundIndicatorCoreActive]} />
@@ -1917,7 +2218,7 @@ export default function App() {
               <Pressable onPress={toggleSound} style={styles.soundSetting}>
                 <View>
                   <Text style={styles.soundSettingTitle}>{soundEnabled ? (language === 'pl' ? 'WŁĄCZONE' : 'ENABLED') : (language === 'pl' ? 'WYŁĄCZONE' : 'DISABLED')}</Text>
-                  <Text style={styles.soundSettingDescription}>{language === 'pl' ? 'Start, AI, przejścia i ciche pękanie szkła' : 'Startup, AI, transitions, and quiet glass shatter'}</Text>
+                  <Text style={styles.soundSettingDescription}>{language === 'pl' ? 'Subtelne dźwięki startu, AI i przejść' : 'Subtle startup, AI, and transition sounds'}</Text>
                 </View>
                 <View style={[styles.soundIndicator, soundEnabled && styles.soundIndicatorActive]}>
                   <View style={[styles.soundIndicatorCore, soundEnabled && styles.soundIndicatorCoreActive]} />
@@ -1931,8 +2232,8 @@ export default function App() {
         {showSystemSettings && (
           <View style={styles.modalBackdrop}>
             <ScrollView style={[styles.modalCard, styles.settingsCard, customThemeDark && paletteStyles.panel]} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.modalTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'USTAWIENIA SYSTEMOWE' : 'SYSTEM SETTINGS'}</Text>
-              <Text style={[styles.settingsWindowPath, customThemeDark && paletteStyles.accentText]}>linuxfix/settings.conf</Text>
+              <Text style={[styles.modalTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'Ustawienia' : 'Settings'}</Text>
+              <Text style={[styles.settingsWindowPath, customThemeDark && paletteStyles.accentText]}>{language === 'pl' ? 'Konto, prywatność i aplikacja' : 'Account, privacy and application'}</Text>
 
               <Pressable onPress={() => { setShowSystemSettings(false); setShowAccount(true); }} style={({ pressed }) => [styles.settingsRoute, pressed && styles.buttonPressed]}>
                 <View>
@@ -1941,6 +2242,16 @@ export default function App() {
                 </View>
                 <Text style={[styles.settingsRouteArrow, customThemeDark && paletteStyles.text]}>→</Text>
               </Pressable>
+
+              {developerAccess && (
+                <Pressable onPress={() => { setShowSystemSettings(false); setShowDeveloperPanel(true); }} style={({ pressed }) => [styles.settingsRoute, styles.developerRoute, pressed && styles.buttonPressed]}>
+                  <View>
+                    <Text style={[styles.settingsRouteTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'PANEL DEWELOPERSKI' : 'DEVELOPER PANEL'}</Text>
+                    <Text style={[styles.settingsRouteDescription, customThemeDark && paletteStyles.mutedText]}>{language === 'pl' ? `Dostęp: ${developerAccess}. Narzędzia testowe.` : `Access: ${developerAccess}. Testing tools.`}</Text>
+                  </View>
+                  <Text style={[styles.settingsRouteArrow, customThemeDark && paletteStyles.text]}>›</Text>
+                </Pressable>
+              )}
 
               <Pressable
                 onPress={() => {
@@ -1983,6 +2294,25 @@ export default function App() {
                   <Pressable onPress={() => { setShowAccount(false); setShowHistory(true); }} style={styles.accountHistoryLink}>
                     <Text style={styles.accountHistoryLinkText}>{language === 'pl' ? 'OTWÓRZ HISTORIĘ ANALIZ' : 'OPEN ANALYSIS HISTORY'}</Text>
                   </Pressable>
+                  {developerAccess && (
+                    <Pressable onPress={() => { setShowAccount(false); setShowDeveloperPanel(true); }} style={[styles.accountHistoryLink, styles.developerRoute]}>
+                      <Text style={styles.accountHistoryLinkText}>{language === 'pl' ? 'OTWÓRZ PANEL DEWELOPERSKI' : 'OPEN DEVELOPER PANEL'}</Text>
+                    </Pressable>
+                  )}
+                  <TextInput
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onChangeText={setNewAccountPassword}
+                    placeholder={language === 'pl' ? 'Nowe hasło (min. 12 znaków)' : 'New password (12 characters minimum)'}
+                    placeholderTextColor="#499BED"
+                    secureTextEntry
+                    style={styles.modalInput}
+                    value={newAccountPassword}
+                  />
+                  <Pressable disabled={accountLoading || !newAccountPassword} onPress={() => void changeAccountPassword()} style={[styles.accountHistoryLink, (!newAccountPassword || accountLoading) && styles.buttonDisabled]}>
+                    <Text style={styles.accountHistoryLinkText}>{language === 'pl' ? 'ZMIEŃ HASŁO' : 'CHANGE PASSWORD'}</Text>
+                  </Pressable>
+                  {!!accountNotice && <Text style={styles.accountOk}>{accountNotice}</Text>}
                   {!!accountError && <Text style={styles.aiError}>{accountError}</Text>}
                   <Pressable onPress={() => void logout()} style={styles.modalClose}><Text style={styles.modalCloseText}>{copy.logout}</Text></Pressable>
                   <Pressable disabled={accountLoading} onPress={() => void deleteAccount()} style={styles.deleteAccountButton}>
@@ -1993,11 +2323,12 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <TextInput autoCapitalize="none" autoCorrect={false} keyboardType="email-address" onChangeText={setAccountEmail} placeholder="email@example.com" placeholderTextColor="#499BED" style={styles.modalInput} value={accountEmail} />
+                  <TextInput autoCapitalize="none" autoCorrect={false} onChangeText={setAccountIdentifier} placeholder={language === 'pl' ? 'Nazwa użytkownika lub e-mail' : 'Username or email'} placeholderTextColor="#499BED" style={styles.modalInput} value={accountIdentifier} />
                   <TextInput onChangeText={setAccountPassword} placeholder={language === 'pl' ? 'Hasło' : 'Password'} placeholderTextColor="#499BED" secureTextEntry style={styles.modalInput} value={accountPassword} />
+                  {!!accountNotice && <Text style={styles.accountOk}>{accountNotice}</Text>}
                   {!!accountError && <Text style={styles.aiError}>{accountError}</Text>}
                   <Pressable disabled={accountLoading} onPress={() => void submitAccount()} style={[styles.modalClose, accountLoading && styles.buttonDisabled]}><Text style={styles.modalCloseText}>{accountLoading ? (language === 'pl' ? 'PROSZĘ CZEKAĆ' : 'PLEASE WAIT') : accountMode === 'login' ? copy.login : copy.register}</Text></Pressable>
-                  <Pressable onPress={() => { setAccountError(''); setAccountMode(accountMode === 'login' ? 'register' : 'login'); }}><Text style={styles.modalLink}>{accountMode === 'login' ? copy.register : copy.login}</Text></Pressable>
+                  <Pressable onPress={() => { setAccountError(''); setAccountNotice(''); setAccountMode(accountMode === 'login' ? 'register' : 'login'); }}><Text style={styles.modalLink}>{accountMode === 'login' ? copy.register : copy.login}</Text></Pressable>
                 </>
               )}
               <Pressable onPress={() => { setShowAccount(false); setConfirmDeleteAccount(false); setAccountError(''); }}><Text style={styles.modalCancel}>{language === 'pl' ? 'ANULUJ' : 'CANCEL'}</Text></Pressable>
@@ -2019,7 +2350,7 @@ export default function App() {
                     <View style={[styles.historyMarker, item.role === 'assistant' && styles.historyMarkerAi]} />
                     <View style={styles.historyBody}>
                       <View style={styles.historyItemHeader}>
-                        <Text style={styles.historyRole}>{item.role === 'user' ? (language === 'pl' ? 'TWOJE ZAPYTANIE' : 'YOUR REQUEST') : 'ODPOWIEDŹ AI'}</Text>
+                        <Text style={styles.historyRole}>{item.role === 'user' ? (language === 'pl' ? 'TWOJE ZAPYTANIE' : 'YOUR REQUEST') : (language === 'pl' ? 'ODPOWIEDŹ AI' : 'AI RESPONSE')}</Text>
                         {!!item.createdAt && <Text style={styles.historyDate}>{new Date(item.createdAt).toLocaleString(language === 'pl' ? 'pl-PL' : 'en-GB')}</Text>}
                       </View>
                       <Text style={styles.historyContent}>{item.content}</Text>
@@ -2040,7 +2371,7 @@ export default function App() {
 
   return (
     <FontFamilyContext.Provider value={selectedFontFamily}>
-      <SafeAreaView style={[styles.safeArea, themeMode === 'light' && styles.lightSurface, customThemeDark && paletteStyles.root]}>
+      <SafeAreaView style={[styles.safeArea, themeMode === 'light' && styles.lightSurface, customThemeDark && paletteStyles.root, workspaceStyles.root]}>
     <ScrollView
       ref={workspaceScrollRef}
       contentContainerStyle={[
@@ -2048,12 +2379,14 @@ export default function App() {
         themeMode === 'light' && styles.lightSurface,
         customThemeDark && paletteStyles.root,
         Platform.OS === 'android' && { paddingTop: (NativeStatusBar.currentHeight ?? 24) + 16 },
+        workspaceStyles.container,
       ]}
       keyboardShouldPersistTaps="handled"
     >
       <Animated.View
         style={[
           styles.workspaceCanvas,
+          workspaceStyles.canvas,
           {
             opacity: workspaceReveal,
             transform: [
@@ -2063,62 +2396,52 @@ export default function App() {
           },
         ]}
       >
-        <View style={[styles.topline, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel]}>
+        <WorkspaceChrome mode={selectedDesignMode} palette={activePalette} language={language} fontFamily={selectedFontFamily} />
+        <View style={[styles.topline, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel, workspaceStyles.topline]}>
           <Pressable
             accessibilityLabel="Wróć do wyboru systemu"
             onPress={returnToMenu}
             style={styles.backButton}
           >
-            <Text style={[styles.backArrow, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>‹</Text>
+            <Text style={[styles.backArrow, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text, workspaceStyles.text]}>‹</Text>
           </Pressable>
           <Pressable onPress={returnToMenu}>
-            <Text style={[styles.brand, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>LINUXFIX</Text>
+            <Text style={[styles.brand, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text, workspaceStyles.text]}>LINUXFIX</Text>
           </Pressable>
-          <Text style={[styles.distroPill, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.accentText]}>{theme.label}</Text>
+          <Text style={[styles.distroPill, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.accentText, workspaceStyles.accent]}>{theme.label}</Text>
           {renderRgbGlow(0)}
         </View>
 
-        <View style={[styles.workspaceSignal, { borderLeftColor: customThemeEnabled ? activePalette.accent : theme.accent }, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel]}>
-          <Text style={[styles.workspaceEyebrow, { color: theme.soft }, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.accentText]}>{language === 'pl' ? 'AKTYWNE ŚRODOWISKO' : 'ACTIVE ENVIRONMENT'}</Text>
-          <Text style={[styles.workspaceDistro, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{theme.label}</Text>
-          <Text style={[styles.workspaceDescription, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>{language === 'pl'
-            ? (distro === 'arch' ? 'Pacman, systemd i ArchWiki w jednym miejscu.' : 'APT, usługi systemowe i stabilna diagnostyka.')
-            : (distro === 'arch' ? 'Pacman, systemd, and ArchWiki in one workspace.' : 'APT, system services, and stable diagnostics.')}</Text>
-          {renderRgbGlow(0)}
-        </View>
-
-        <Text style={[styles.title, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'Od czego zaczynamy?' : 'What should we solve first?'}</Text>
-        <Text style={[styles.subtitle, themeMode === 'light' && styles.lightMuted, customThemeDark && paletteStyles.mutedText]}>{copy.subtitle}</Text>
-
-        <View style={[styles.diagnosticStrip, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel]}>
-          <View style={styles.diagnosticStripItem}>
-            <Text style={[styles.diagnosticStripLabel, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.accentText]}>{language === 'pl' ? 'BAZA LOKALNA' : 'LOCAL RULES'}</Text>
-            <Text style={[styles.diagnosticStripValue, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{rulesForDistro(distro).length} {language === 'pl' ? 'REGUŁ' : 'RULES'}</Text>
+        <View style={[styles.workspaceIdentity, workspaceStyles.identity]}>
+          <Image source={DISTRO_LOGOS[distro]} style={[styles.workspaceAvatar, workspaceStyles.avatar]} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.workspaceName, workspaceStyles.name, { color: activePalette.text }, workspaceStyles.text]}>{theme.label}</Text>
+            <Text style={[styles.workspaceCaption, { color: activePalette.muted }, workspaceStyles.muted]}>{DISTRO_WORKSPACE_COPY[distro][language]}</Text>
           </View>
-          <View style={styles.diagnosticStripDivider} />
-          <View style={styles.diagnosticStripItem}>
-            <Text style={[styles.diagnosticStripLabel, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.accentText]}>AI</Text>
-            <Text style={[styles.diagnosticStripValue, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'BEZPIECZNE KROKI' : 'SAFE STEPS'}</Text>
+        </View>
+
+        <View style={[styles.composer, { backgroundColor: activePalette.surface }, workspaceStyles.composer]}>
+          <View style={styles.composerHeading}>
+            <Text style={[styles.composerTitle, workspaceStyles.composerTitle]}>{language === 'pl' ? 'Nowe zapytanie' : 'New request'}</Text>
+            <View style={[styles.connectionChip, workspaceStyles.chip, { backgroundColor: activePalette.inset }]}>
+              <View style={[styles.connectionDot, { backgroundColor: aiStatus === 'online' ? '#78B8A0' : '#A4A9B0' }]} />
+              <Text style={[styles.connectionLabel, { color: activePalette.muted }, workspaceStyles.muted]}>{aiStatus === 'online' ? 'AI online' : aiStatus === 'checking' ? (language === 'pl' ? 'Łączenie' : 'Connecting') : 'AI offline'}</Text>
+            </View>
           </View>
-          {renderRgbGlow(0)}
-        </View>
+          <Text style={[styles.composerDescription, { color: activePalette.muted }, workspaceStyles.muted]}>{language === 'pl' ? 'Opisz, co chcesz zrobić, albo wklej komunikat błędu.' : 'Describe what you want to do, or paste an error message.'}</Text>
+          <View style={styles.quickQuestions}>
+            <Pressable onPress={() => updateProblem(language === 'pl' ? 'Jak bezpiecznie zaktualizować system?' : 'How do I safely update my system?')} style={[styles.questionChip, workspaceStyles.chip, { backgroundColor: activePalette.inset }]}>
+              <Text style={{ color: activePalette.accent, fontSize: 12 }}>{language === 'pl' ? 'Aktualizacja systemu ↗' : 'System update ↗'}</Text>
+            </Pressable>
+            <Pressable onPress={insertExample} style={[styles.questionChip, workspaceStyles.chip, { backgroundColor: activePalette.inset }]}>
+              <Text style={{ color: activePalette.accent, fontSize: 12 }}>{language === 'pl' ? 'Przykładowy błąd ↗' : 'Example error ↗'}</Text>
+            </Pressable>
+          </View>
 
-        <View style={styles.status}>
-          <View style={[styles.statusDot, aiStatus === 'online' && styles.statusDotOnline, aiStatus === 'offline' && styles.statusDotOffline]} />
-          <Text style={[styles.statusText, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.mutedText]}>{detectedLabel}</Text>
-          <Text style={[styles.aiStatusText, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}>
-            AI: {aiStatus === 'checking'
-              ? (language === 'pl' ? 'SPRAWDZANIE' : 'CHECKING')
-              : aiStatus === 'online'
-                ? 'ONLINE'
-                : 'OFFLINE'}
-          </Text>
-        </View>
-
-        <View style={[styles.terminalFrame, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel]}>
-          <View style={[styles.terminalTitlebar, customThemeEnabled && paletteStyles.bar]}>
-            <Text style={styles.terminalTitle}>{language === 'pl' ? 'WEJŚCIE / PYTANIE, BŁĄD LUB LOG' : 'INPUT / QUESTION, ERROR, OR LOG'}</Text>
-            <Text style={styles.terminalCounter}>{problem.length.toString().padStart(3, '0')}</Text>
+        <View style={[styles.terminalFrame, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel, workspaceStyles.terminal]}>
+          <View style={[styles.terminalTitlebar, customThemeEnabled && paletteStyles.bar, workspaceStyles.titlebar]}>
+            <Text style={[styles.terminalTitle, workspaceStyles.titlebarText]}>{language === 'pl' ? 'Twoja wiadomość' : 'Your message'}</Text>
+            <Text style={[styles.terminalCounter, workspaceStyles.titlebarText]}>{problem.length.toString().padStart(3, '0')}</Text>
           </View>
           {rgbEnabled && (
             <View style={styles.rgbSpectrum}>
@@ -2128,8 +2451,9 @@ export default function App() {
               {renderRgbRunner()}
             </View>
           )}
-          <View style={[styles.inputShell, themeMode === 'light' && styles.inputShellLight, customThemeDark && paletteStyles.panel, isProblemFocused && styles.inputShellFocused]}>
+          <View style={[styles.inputShell, themeMode === 'light' && styles.inputShellLight, customThemeDark && paletteStyles.panel, isProblemFocused && styles.inputShellFocused, workspaceStyles.inputShell]}>
             <TextInput
+              maxLength={20_000}
               multiline
               onBlur={() => setIsProblemFocused(false)}
               onChangeText={updateProblem}
@@ -2137,7 +2461,7 @@ export default function App() {
               placeholder={language === 'pl' ? 'np. Jak włączyć usługę przy starcie systemu?' : 'e.g. How do I enable a service at startup?'}
               placeholderTextColor={customThemeEnabled ? activePalette.muted : '#499BED'}
               selectionColor={customThemeEnabled ? activePalette.accent : '#DAEAFF'}
-              style={[styles.input, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text]}
+              style={[styles.input, workspaceStyles.input, themeMode === 'light' && styles.lightText, customThemeDark && paletteStyles.text, workspaceStyles.text]}
               textAlignVertical="top"
               value={problem}
             />
@@ -2153,13 +2477,14 @@ export default function App() {
           {renderRgbGlow(0)}
         </View>
 
-        <View style={styles.actions}>
+        <View style={[styles.actions, themeMode === 'light' && styles.hyprWindowLight, customThemeDark && paletteStyles.panel, workspaceStyles.actions]}>
           <Pressable
             disabled={aiLoading || aiStatus === 'checking'}
             onPress={analyzeWithAi}
             style={({ pressed }) => [
               styles.primaryButton,
-              { backgroundColor: customThemeEnabled ? activePalette.accent : theme.accent },
+              workspaceStyles.primary,
+              { backgroundColor: activePalette.accent },
               (aiLoading || aiStatus === 'checking') && styles.buttonDisabled,
               pressed && styles.buttonPressed,
             ]}
@@ -2176,48 +2501,49 @@ export default function App() {
                     },
                   ]}
                 />
-                <Text style={[styles.primaryText, customThemeEnabled && { color: activePalette.onAccent }]}>{language === 'pl' ? 'ANALIZOWANIE' : 'ANALYZING'}</Text>
+                <Text style={[styles.primaryText, workspaceStyles.onAccent]}>{language === 'pl' ? 'ANALIZOWANIE' : 'ANALYZING'}</Text>
               </View>
-            ) : <Text style={[styles.primaryText, customThemeEnabled && { color: activePalette.onAccent }]}>{copy.ai}</Text>}
+            ) : <Text style={[styles.primaryText, workspaceStyles.onAccent]}>{copy.ai}</Text>}
             {renderRgbGlow(0)}
           </Pressable>
           {aiLoading && (
-            <Text style={[styles.aiLoadingHint, customThemeDark && paletteStyles.mutedText]}>
+            <Text style={[styles.aiLoadingHint, customThemeDark && paletteStyles.mutedText, workspaceStyles.muted]}>
               {language === 'pl'
                 ? 'Ollama przygotowuje odpowiedź. Pierwsza analiza może potrwać do 90 sekund.'
                 : 'Ollama is preparing the response. The first analysis can take up to 90 seconds.'}
             </Text>
           )}
-          <Pressable onPress={analyze} style={({ pressed }) => [styles.secondaryButton, customThemeEnabled && paletteStyles.border, pressed && styles.buttonPressed]}>
-            <Text style={[styles.secondaryText, customThemeDark && paletteStyles.text]}>{copy.analyze}</Text>
+          <Pressable onPress={analyze} style={({ pressed }) => [styles.secondaryButton, workspaceStyles.secondary, customThemeEnabled && paletteStyles.border, pressed && styles.buttonPressed]}>
+            <Text style={[styles.secondaryText, customThemeDark && paletteStyles.text, workspaceStyles.text]}>{copy.analyze}</Text>
             {renderRgbGlow(0)}
           </Pressable>
           <Pressable
             onPress={insertExample}
             style={({ pressed }) => [styles.exampleButton, pressed && styles.buttonPressed]}
           >
-            <Text style={styles.exampleButtonText}>{language === 'pl' ? 'Wstaw przykładowy błąd' : 'Use an example error'}</Text>
+            <Text style={[styles.exampleButtonText, workspaceStyles.accent]}>{language === 'pl' ? 'Wstaw przykładowy błąd' : 'Use an example error'}</Text>
           </Pressable>
-          {!!aiError && <Text style={styles.aiError}>{aiError}</Text>}
+          {!!aiError && <Text style={[styles.aiError, workspaceStyles.muted]}>{aiError}</Text>}
+        </View>
         </View>
         <Pressable onPress={() => setShowHostSettings((visible) => !visible)} style={styles.hostToggle}>
-          <Text style={styles.hostToggleText}>{showHostSettings
+          <Text style={[styles.hostToggleText, workspaceStyles.accent]}>{showHostSettings
             ? (language === 'pl' ? 'UKRYJ USTAWIENIA HOSTA' : 'HIDE HOST SETTINGS')
             : (language === 'pl' ? 'WŁASNY HOST AI' : 'CUSTOM AI HOST')}</Text>
         </Pressable>
         {showHostSettings && (
           <>
-            <Text style={styles.backendLabel}>{language === 'pl' ? 'ADRES BACKENDU AI' : 'AI BACKEND ADDRESS'}</Text>
+            <Text style={[styles.backendLabel, workspaceStyles.accent]}>{language === 'pl' ? 'ADRES BACKENDU AI' : 'AI BACKEND ADDRESS'}</Text>
             <TextInput
               autoCapitalize="none"
               autoCorrect={false}
               onChangeText={setBackendUrl}
               placeholder="http://192.168.1.10:8787"
               placeholderTextColor="#499BED"
-              style={styles.backendInput}
+              style={[styles.backendInput, workspaceStyles.command, workspaceStyles.text]}
               value={backendUrl}
             />
-            <Text style={styles.backendHint}>
+            <Text style={[styles.backendHint, workspaceStyles.muted]}>
               {language === 'pl'
                 ? 'Domyślny adres jest pobierany z konfiguracji LinuxFIX. To pole służy tylko jako tymczasowe nadpisanie.'
                 : 'The default address comes from LinuxFIX configuration. Use this field only for a temporary override.'}
@@ -2227,23 +2553,23 @@ export default function App() {
         {searched && !result && (
           <>
             {suggestions.length > 0 ? (
-              <View style={[styles.suggestionCard, customThemeDark && paletteStyles.panel]}>
-                <Text style={[styles.emptyTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'Podobne problemy' : 'Similar problems'}</Text>
-                <Text style={[styles.emptyText, customThemeDark && paletteStyles.mutedText]}>{language === 'pl' ? 'Nie znaleziono dokładnej reguły. Sprawdź jedno z podobnych dopasowań:' : 'No exact rule was found. Review one of these similar matches:'}</Text>
+              <View style={[styles.suggestionCard, customThemeDark && paletteStyles.panel, workspaceStyles.result]}>
+                <Text style={[styles.emptyTitle, customThemeDark && paletteStyles.text, workspaceStyles.text]}>{language === 'pl' ? 'Podobne problemy' : 'Similar problems'}</Text>
+                <Text style={[styles.emptyText, customThemeDark && paletteStyles.mutedText, workspaceStyles.muted]}>{language === 'pl' ? 'Nie znaleziono dokładnej reguły. Sprawdź jedno z podobnych dopasowań:' : 'No exact rule was found. Review one of these similar matches:'}</Text>
                 {suggestions.map((suggestion) => (
                   <Pressable key={suggestion.id} onPress={() => chooseSuggestion(suggestion)} style={styles.suggestion}>
                     <View style={styles.suggestionText}>
-                      <Text style={[styles.suggestionTitle, customThemeDark && paletteStyles.text]}>{localizedFix(suggestion, language).title}</Text>
-                      <Text style={[styles.suggestionCategory, customThemeDark && paletteStyles.accentText]}>{localizedCategory(suggestion, language)}</Text>
+                      <Text style={[styles.suggestionTitle, customThemeDark && paletteStyles.text, workspaceStyles.text]}>{localizedFix(suggestion, language).title}</Text>
+                      <Text style={[styles.suggestionCategory, customThemeDark && paletteStyles.accentText, workspaceStyles.accent]}>{localizedCategory(suggestion, language)}</Text>
                     </View>
                     <Text style={[styles.arrow, { color: theme.soft }]}>-&gt;</Text>
                   </Pressable>
                 ))}
               </View>
             ) : (
-              <View style={[styles.emptyCard, customThemeDark && paletteStyles.panel]}>
-                <Text style={[styles.emptyTitle, customThemeDark && paletteStyles.text]}>{language === 'pl' ? 'Brak lokalnego dopasowania' : 'No local match'}</Text>
-                <Text style={[styles.emptyText, customThemeDark && paletteStyles.mutedText]}>
+              <View style={[styles.emptyCard, customThemeDark && paletteStyles.panel, workspaceStyles.result]}>
+                <Text style={[styles.emptyTitle, customThemeDark && paletteStyles.text, workspaceStyles.text]}>{language === 'pl' ? 'Brak lokalnego dopasowania' : 'No local match'}</Text>
+                <Text style={[styles.emptyText, customThemeDark && paletteStyles.mutedText, workspaceStyles.muted]}>
                   {language === 'pl'
                     ? 'Baza lokalna rozpoznaje typowe błędy. Dla pytań i nowych problemów użyj przycisku „Zapytaj AI”.'
                     : 'Local rules recognize common errors. For questions and new issues, use “Ask AI”.'}
@@ -2254,18 +2580,18 @@ export default function App() {
         )}
 
         {displayedResult && (
-          <View style={[styles.resultCard, customThemeDark && paletteStyles.panel]}>
-            <Text style={[styles.resultEyebrow, customThemeDark && paletteStyles.accentText]}>{language === 'pl' ? 'DOPASOWANIE LOKALNE' : 'LOCAL MATCH'}</Text>
-            <Text style={[styles.resultTitle, customThemeDark && paletteStyles.text]}>{displayedResult.title}</Text>
-            <Text style={[styles.resultSummary, customThemeDark && paletteStyles.mutedText]}>{displayedResult.summary}</Text>
-            <Text style={[styles.commandLabel, customThemeDark && paletteStyles.accentText]}>{language === 'pl' ? 'SUGEROWANE KROKI' : 'SUGGESTED STEPS'}</Text>
+          <View style={[styles.resultCard, customThemeDark && paletteStyles.panel, workspaceStyles.result]}>
+            <Text style={[styles.resultEyebrow, customThemeDark && paletteStyles.accentText, workspaceStyles.accent]}>{language === 'pl' ? 'DOPASOWANIE LOKALNE' : 'LOCAL MATCH'}</Text>
+            <Text style={[styles.resultTitle, customThemeDark && paletteStyles.text, workspaceStyles.resultTitle]}>{displayedResult.title}</Text>
+            <Text style={[styles.resultSummary, customThemeDark && paletteStyles.mutedText, workspaceStyles.muted]}>{displayedResult.summary}</Text>
+            <Text style={[styles.commandLabel, customThemeDark && paletteStyles.accentText, workspaceStyles.accent]}>{language === 'pl' ? 'SUGEROWANE KROKI' : 'SUGGESTED STEPS'}</Text>
             {displayedResult.commands.map((command) => (
-              <View key={command} style={[styles.command, customThemeDark && paletteStyles.inset]}>
-                <Text style={[styles.commandText, { color: theme.soft }, customThemeDark && paletteStyles.text]}>{command}</Text>
+              <View key={command} style={[styles.command, workspaceStyles.command, customThemeDark && paletteStyles.inset]}>
+                <Text style={[styles.commandText, { color: theme.soft }, customThemeDark && paletteStyles.text, workspaceStyles.text]}>{command}</Text>
               </View>
             ))}
-            <Pressable onPress={openSource} style={styles.sourceButton}>
-              <Text style={[styles.sourceText, { color: theme.soft }]}>{displayedResult.sourceLabel}  ↗</Text>
+            <Pressable onPress={openSource} style={[styles.sourceButton, workspaceStyles.source]}>
+              <Text style={[styles.sourceText, { color: activePalette.accent }]}>{displayedResult.sourceLabel}  ↗</Text>
             </Pressable>
             {renderRgbGlow(0)}
           </View>
@@ -2275,6 +2601,7 @@ export default function App() {
           <Animated.View
             style={[
               styles.aiLiveWindow,
+              workspaceStyles.aiWindow,
               {
                 backgroundColor: aiPanelColors.background,
                 borderColor: aiPanelColors.accent,
@@ -2290,7 +2617,7 @@ export default function App() {
               <View style={styles.aiLiveWindowIdentity}>
                 <View style={[styles.aiLiveWindowSignal, { backgroundColor: aiPanelColors.onAccent }]} />
                 <Text style={[styles.aiLiveWindowTitle, { color: aiPanelColors.onAccent }]}>
-                  {language === 'pl' ? 'ODPOWIEDŹ AI / NA ŻYWO' : 'AI RESPONSE / LIVE'}
+                  {language === 'pl' ? 'Odpowiedź asystenta' : 'Assistant response'}
                 </Text>
               </View>
               <Text style={[styles.aiLiveWindowState, { color: aiPanelColors.onAccent }]}>
@@ -2352,7 +2679,7 @@ export default function App() {
                 {revealedAiResult.steps.map((step, index) => (
                   step.description.visible || step.command.visible || step.description.active || step.command.active
                 ) ? (
-                  <View key={`ai-step-${index}`} style={[styles.aiLiveStep, { backgroundColor: aiPanelColors.inset, borderLeftColor: aiPanelColors.accent }]}>
+                  <View key={`ai-step-${index}`} style={[styles.aiLiveStep, workspaceStyles.aiStep, { backgroundColor: aiPanelColors.inset, borderLeftColor: aiPanelColors.accent }]}>
                     <View style={styles.aiLiveStepHeader}>
                       <Text style={[styles.aiLiveStepNumber, { color: aiPanelColors.accent }]}>{String(index + 1).padStart(2, '0')}</Text>
                       <Text style={[styles.aiRisk, { color: aiPanelColors.accent }]}>{language === 'pl' ? 'RYZYKO' : 'RISK'}: {step.risk.toUpperCase()}</Text>
@@ -2362,7 +2689,8 @@ export default function App() {
                     </Text>
                     {(step.command.visible || step.command.active) && (
                       <View style={[styles.aiLiveCommand, { borderColor: aiPanelColors.accent }]}>
-                        <Text style={[styles.aiLiveCommandText, { color: aiPanelColors.text }]}>
+                        <Text style={[styles.aiCommandLabel, { color: aiPanelColors.accent }]}>{language === 'pl' ? 'WPISZ W TERMINALU' : 'TYPE IN TERMINAL'}</Text>
+                        <Text selectable style={[styles.aiLiveCommandText, { color: aiPanelColors.text }]}>
                           {step.command.text}{aiCursor(step.command.active)}
                         </Text>
                       </View>
@@ -2389,9 +2717,9 @@ export default function App() {
           </Animated.View>
         )}
 
-        <View style={styles.note}>
-          <Text style={styles.noteTitle}>{copy.important}</Text>
-          <Text style={styles.noteText}>{copy.importantText}</Text>
+        <View style={[styles.note, workspaceStyles.note]}>
+          <Text style={[styles.noteTitle, workspaceStyles.accent]}>{copy.important}</Text>
+          <Text style={[styles.noteText, workspaceStyles.muted]}>{copy.importantText}</Text>
         </View>
       </Animated.View>
       </ScrollView>
@@ -2403,44 +2731,59 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#031725' },
-  lightSurface: { backgroundColor: '#A1C6F6' },
-  lightText: { color: '#031725' },
-  lightMuted: { color: '#499BED' },
-  menuSurface: { backgroundColor: '#031725', flex: 1 },
-  menuSurfaceLight: { backgroundColor: '#A1C6F6' },
-  bootScreen: { alignItems: 'center', backgroundColor: '#031725', flex: 1, justifyContent: 'center', padding: 24 },
+  developerRoute: { borderColor: '#82B6D9', borderWidth: 1 },
+  workspaceIdentity: { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 20, borderRadius: 14, marginTop: 16 },
+  workspaceAvatar: { width: 48, height: 48, borderRadius: 12 },
+  workspaceName: { fontSize: 21, fontWeight: '500' },
+  workspaceCaption: { fontSize: 12, lineHeight: 19, marginTop: 6 },
+  composer: { padding: 20, borderRadius: 14, marginTop: 16 },
+  composerHeading: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' },
+  composerTitle: { fontSize: 21, fontWeight: '500', letterSpacing: -0.5 },
+  composerDescription: { fontSize: 14, lineHeight: 22, marginTop: 12 },
+  connectionChip: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 6 },
+  connectionDot: { width: 6, height: 6, borderRadius: 3 },
+  connectionLabel: { fontSize: 10 },
+  quickQuestions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 20 },
+  questionChip: { padding: 12, borderRadius: 8 },
+  introPanel: { backgroundColor: '#1B2C37', borderRadius: 12, padding: 20, marginTop: 16 },
+  safeArea: { flex: 1, backgroundColor: '#101C24' },
+  lightSurface: { backgroundColor: '#F4F5F2' },
+  lightText: { color: '#101C24' },
+  lightMuted: { color: '#52636B' },
+  menuSurface: { backgroundColor: '#101C24', flex: 1 },
+  menuSurfaceLight: { backgroundColor: '#F4F5F2' },
+  bootScreen: { alignItems: 'center', backgroundColor: '#101C24', flex: 1, justifyContent: 'center', padding: 24 },
   bootMark: { alignItems: 'center', height: 144, justifyContent: 'center', width: 144 },
   bootLogoClip: { borderRadius: 8, height: 112, overflow: 'hidden', width: 112 },
   bootLogo: { height: 112, width: 112 },
-  bootScan: { backgroundColor: '#A1C6F6', height: 2, left: 0, position: 'absolute', right: 0, top: 55 },
-  bootCorner: { borderColor: '#DAEAFF', height: 22, position: 'absolute', width: 22 },
+  bootScan: { backgroundColor: '#B6C7D1', height: 2, left: 0, position: 'absolute', right: 0, top: 55 },
+  bootCorner: { borderColor: '#EDF3F5', height: 22, position: 'absolute', width: 22 },
   bootCornerTopLeft: { borderLeftWidth: 2, borderTopWidth: 2, left: 0, top: 0 },
   bootCornerTopRight: { borderRightWidth: 2, borderTopWidth: 2, right: 0, top: 0 },
   bootCornerBottomLeft: { borderBottomWidth: 2, borderLeftWidth: 2, bottom: 0, left: 0 },
   bootCornerBottomRight: { borderBottomWidth: 2, borderRightWidth: 2, bottom: 0, right: 0 },
-  bootBrand: { color: '#A1C6F6', fontSize: 29, fontWeight: '800', letterSpacing: 4, marginTop: 24 },
-  bootTitle: { color: '#DAEAFF', fontSize: 9, fontWeight: '800', letterSpacing: 2.2, marginTop: 40 },
-  bootProgressTrack: { backgroundColor: '#022E5B', height: 2, marginTop: 16, overflow: 'hidden', width: 192 },
-  bootProgressFill: { backgroundColor: '#DAEAFF', height: 2, transformOrigin: 'left', width: '100%' },
-  bootSubtitle: { color: '#A1C6F6', fontSize: 11, marginTop: 16 },
-  container: { backgroundColor: '#031725', flexGrow: 1, padding: 24, paddingBottom: 48 },
+  bootBrand: { color: '#B6C7D1', fontSize: 29, fontWeight: '600', letterSpacing: 4, marginTop: 24 },
+  bootTitle: { color: '#EDF3F5', fontSize: 12, fontWeight: '600', letterSpacing: 2.2, marginTop: 40 },
+  bootProgressTrack: { backgroundColor: '#1B2C37', height: 2, marginTop: 16, overflow: 'hidden', width: 192 },
+  bootProgressFill: { backgroundColor: '#EDF3F5', height: 2, transformOrigin: 'left', width: '100%' },
+  bootSubtitle: { color: '#B6C7D1', fontSize: 11, marginTop: 16 },
+  container: { backgroundColor: '#101C24', flexGrow: 1, padding: 24, paddingBottom: 48 },
   workspaceCanvas: { flex: 1 },
   menuContainer: { flexGrow: 1, paddingBottom: 48, paddingHorizontal: 24 },
-  hyprPanel: { alignItems: 'center', backgroundColor: '#022E5B', borderRadius: 0, flexDirection: 'row', minHeight: 58, overflow: 'hidden', paddingHorizontal: 12, position: 'relative' },
-  hyprPanelLight: { backgroundColor: '#DAEAFF' },
+  hyprPanel: { alignItems: 'center', backgroundColor: '#1B2C37', borderRadius: 0, flexDirection: 'row', minHeight: 58, overflow: 'hidden', paddingHorizontal: 12, position: 'relative' },
+  hyprPanelLight: { backgroundColor: '#EDF3F5' },
   hyprBrand: { alignItems: 'center', flexDirection: 'row', flex: 1 },
   hyprLogo: { borderRadius: 3, height: 32, width: 32 },
-  hyprBrandName: { color: '#DAEAFF', fontSize: 13, fontWeight: '900', letterSpacing: -0.2, marginLeft: 8 },
-  hyprBrandVersion: { color: '#A1C6F6', fontSize: 6, fontWeight: '800', letterSpacing: 0.9, marginLeft: 8, marginTop: 2 },
+  hyprBrandName: { color: '#EDF3F5', fontSize: 13, fontWeight: '600', letterSpacing: -0.2, marginLeft: 8 },
+  hyprBrandVersion: { color: '#B6C7D1', fontSize: 9, fontWeight: '600', letterSpacing: 0.9, marginLeft: 8, marginTop: 2 },
   hyprWorkspaces: { alignItems: 'center', flexDirection: 'row', gap: 4 },
-  hyprWorkspaceActive: { alignItems: 'center', backgroundColor: '#DAEAFF', borderRadius: 0, height: 32, justifyContent: 'center', overflow: 'hidden', width: 34 },
-  hyprWorkspaceActiveText: { color: '#031725', fontSize: 9, fontWeight: '900' },
-  hyprWorkspacePulse: { backgroundColor: '#499BED', bottom: 0, height: 2, position: 'absolute', width: 20 },
-  hyprWorkspace: { color: '#A1C6F6', fontSize: 9, fontWeight: '800', paddingHorizontal: 7, paddingVertical: 10 },
+  hyprWorkspaceActive: { alignItems: 'center', backgroundColor: '#EDF3F5', borderRadius: 0, height: 32, justifyContent: 'center', overflow: 'hidden', width: 34 },
+  hyprWorkspaceActiveText: { color: '#101C24', fontSize: 12, fontWeight: '600' },
+  hyprWorkspacePulse: { backgroundColor: '#82B6D9', bottom: 0, height: 2, position: 'absolute', width: 20 },
+  hyprWorkspace: { color: '#B6C7D1', fontSize: 12, fontWeight: '600', paddingHorizontal: 7, paddingVertical: 10 },
   hyprStatus: { alignItems: 'center', flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
-  hyprStatusDot: { backgroundColor: '#DAEAFF', borderRadius: 1, height: 5, marginRight: 6, width: 5 },
-  hyprStatusText: { color: '#A1C6F6', fontSize: 7, fontWeight: '900', letterSpacing: 0.8 },
+  hyprStatusDot: { backgroundColor: '#EDF3F5', borderRadius: 1, height: 5, marginRight: 6, width: 5 },
+  hyprStatusText: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 0.8 },
   rgbPanelSignal: { bottom: 0, height: 2, left: 0, position: 'absolute', right: 0 },
   rgbSpectrum: { flexDirection: 'row', height: 4, overflow: 'hidden', position: 'relative' },
   rgbSpectrumSegment: { flex: 1, height: 4 },
@@ -2450,15 +2793,15 @@ const styles = StyleSheet.create({
   rgbGlowFrameOuter: { borderWidth: 1, bottom: -2, left: -2, opacity: 0.3, position: 'absolute', right: -2, top: -2 },
   rgbGlowFrame: { borderWidth: 2, bottom: 2, left: 2, opacity: 0.82, position: 'absolute', right: 2, top: 2 },
   rgbGlowEdge: { bottom: 0, height: 3, left: 12, opacity: 0.88, position: 'absolute', right: 12 },
-  hyprHeroWindow: { backgroundColor: '#022E5B', borderRadius: 0, marginTop: 12, overflow: 'hidden' },
-  hyprWindowLight: { backgroundColor: '#DAEAFF' },
-  hyprWindowBar: { alignItems: 'center', backgroundColor: '#499BED', flexDirection: 'row', justifyContent: 'space-between', minHeight: 30, paddingHorizontal: 12 },
-  hyprWindowBarLight: { backgroundColor: '#499BED' },
-  hyprWindowPath: { color: '#DAEAFF', fontFamily: 'monospace', fontSize: 8, fontWeight: '900', letterSpacing: 0.7 },
-  hyprWindowMeta: { color: '#031725', fontSize: 7, fontWeight: '900', letterSpacing: 0.8 },
+  hyprHeroWindow: { backgroundColor: '#1B2C37', borderRadius: 0, marginTop: 12, overflow: 'hidden' },
+  hyprWindowLight: { backgroundColor: '#FFFFFF' },
+  hyprWindowBar: { alignItems: 'center', backgroundColor: '#82B6D9', flexDirection: 'row', justifyContent: 'space-between', minHeight: 30, paddingHorizontal: 12 },
+  hyprWindowBarLight: { backgroundColor: '#82B6D9' },
+  hyprWindowPath: { color: '#EDF3F5', fontFamily: 'monospace', fontSize: 11, fontWeight: '600', letterSpacing: 0.7 },
+  hyprWindowMeta: { color: '#101C24', fontSize: 10, fontWeight: '600', letterSpacing: 0.8 },
   hyprHeroBody: { minHeight: 286, paddingBottom: 34, paddingHorizontal: 24, paddingTop: 30 },
-  hyprPrompt: { color: '#499BED', fontFamily: 'monospace', fontSize: 10, fontWeight: '800', marginBottom: 22 },
-  hyprSectionIndex: { color: '#499BED', fontFamily: 'monospace', fontSize: 8, fontWeight: '900', letterSpacing: 1.1, marginBottom: 7 },
+  hyprPrompt: { color: '#82B6D9', fontFamily: 'monospace', fontSize: 10, fontWeight: '600', marginBottom: 22 },
+  hyprSectionIndex: { color: '#82B6D9', fontFamily: 'monospace', fontSize: 11, fontWeight: '600', letterSpacing: 1.1, marginBottom: 7 },
   crumbleTileShell: { position: 'relative' },
   crumbleTileShellSplit: { flex: 1 },
   crumbleTileFill: { flex: 1 },
@@ -2466,297 +2809,308 @@ const styles = StyleSheet.create({
   glassCrackMap: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0, zIndex: 12 },
   glassPieceLayer: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0, zIndex: 10 },
   glassSplinterLayer: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0, zIndex: 13 },
-  uiWorkspaceTile: { backgroundColor: '#022E5B', borderRadius: 12, marginBottom: 10, minHeight: 126, overflow: 'hidden', padding: 16 },
+  uiWorkspaceTile: { backgroundColor: '#1B2C37', borderRadius: 12, marginBottom: 10, minHeight: 126, overflow: 'hidden', padding: 16 },
   uiWorkspaceHeader: { alignItems: 'flex-start', flexDirection: 'row', justifyContent: 'space-between' },
-  uiWorkspaceTitle: { color: '#DAEAFF', fontSize: 19, fontWeight: '900', letterSpacing: -0.4, marginTop: 7 },
-  uiWorkspaceGlyph: { color: '#499BED', fontSize: 23, fontWeight: '900', letterSpacing: -1 },
-  uiWorkspaceFooter: { alignItems: 'center', borderTopColor: '#499BED', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', marginTop: 'auto', paddingTop: 12 },
-  uiWorkspaceMeta: { color: '#A1C6F6', fontSize: 7, fontWeight: '900', letterSpacing: 0.9 },
-  hyprPrimaryWindow: { backgroundColor: '#022E5B', borderRadius: 12, marginTop: 0, overflow: 'hidden' },
+  uiWorkspaceTitle: { color: '#EDF3F5', fontSize: 19, fontWeight: '600', letterSpacing: -0.4, marginTop: 7 },
+  uiWorkspaceGlyph: { color: '#82B6D9', fontSize: 23, fontWeight: '600', letterSpacing: -1 },
+  uiWorkspaceFooter: { alignItems: 'center', borderTopColor: '#82B6D9', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', marginTop: 'auto', paddingTop: 12 },
+  uiWorkspaceMeta: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 0.9 },
+  hyprPrimaryWindow: { backgroundColor: '#1B2C37', borderRadius: 12, marginTop: 0, overflow: 'hidden' },
   hyprWindowPressed: { opacity: 0.7, transform: [{ scale: 0.965 }, { translateY: 3 }] },
   hyprDistroBody: { alignItems: 'center', flexDirection: 'row', minHeight: 162, padding: 20 },
   hyprDistroCopy: { flex: 1, paddingRight: 18 },
-  hyprDistroTitle: { color: '#DAEAFF', fontSize: 25, fontWeight: '900', letterSpacing: -0.7 },
-  hyprDistroDescription: { color: '#A1C6F6', fontSize: 12, lineHeight: 18, marginTop: 8 },
+  hyprDistroTitle: { color: '#EDF3F5', fontSize: 25, fontWeight: '600', letterSpacing: -0.7 },
+  hyprDistroDescription: { color: '#B6C7D1', fontSize: 12, lineHeight: 18, marginTop: 8 },
   hyprDistroLogo: { borderRadius: 3, height: 70, width: 70 },
-  hyprActionLine: { alignItems: 'center', borderTopColor: '#499BED', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 44, paddingHorizontal: 16 },
-  hyprActionLineLight: { borderTopColor: '#499BED' },
-  hyprActionText: { color: '#DAEAFF', fontSize: 8, fontWeight: '900', letterSpacing: 1.3 },
-  hyprActionArrow: { color: '#DAEAFF', fontSize: 17 },
+  hyprActionLine: { alignItems: 'center', borderTopColor: '#82B6D9', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 44, paddingHorizontal: 16 },
+  hyprActionLineLight: { borderTopColor: '#82B6D9' },
+  hyprActionText: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 1.3 },
+  hyprActionArrow: { color: '#EDF3F5', fontSize: 17 },
   hyprSplit: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  hyprSecondaryWindow: { backgroundColor: '#022E5B', borderRadius: 12, flex: 1, minHeight: 172, overflow: 'hidden', padding: 14 },
+  hyprSecondaryWindow: { backgroundColor: '#1B2C37', borderRadius: 12, flex: 1, minHeight: 172, overflow: 'hidden', padding: 14 },
+  hyprNixWindow: { minHeight: 184 },
+  hyprCachyWindow: { minHeight: 184 },
   hyprSecondaryHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   hyprSmallLogo: { borderRadius: 2, height: 28, width: 28 },
-  hyprSecondaryTitle: { color: '#DAEAFF', fontSize: 18, fontWeight: '900', marginTop: 20 },
-  hyprSecondaryDescription: { color: '#A1C6F6', fontSize: 10, lineHeight: 15, marginTop: 5 },
-  hyprSecondaryAction: { color: '#DAEAFF', fontSize: 8, fontWeight: '900', letterSpacing: 1, marginTop: 'auto', paddingTop: 16 },
-  hyprDisabledWindow: { opacity: 0.48 },
-  hyprDisabledLogo: { opacity: 0.65 },
-  hyprComingSoon: { color: '#499BED', fontSize: 8, fontWeight: '900', letterSpacing: 1, marginTop: 'auto', paddingTop: 16 },
-  hyprDock: { alignItems: 'stretch', backgroundColor: '#022E5B', borderRadius: 0, flexDirection: 'row', marginTop: 10, minHeight: 66 },
+  hyprSecondaryTitle: { color: '#EDF3F5', fontSize: 18, fontWeight: '600', marginTop: 20 },
+  hyprSecondaryDescription: { color: '#B6C7D1', fontSize: 10, lineHeight: 15, marginTop: 5 },
+  hyprSecondaryAction: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 1, marginTop: 'auto', paddingTop: 16 },
+  hyprDisabledWindow: { opacity: 0.68 },
+  hyprDisabledLogo: { opacity: 0.82 },
+  hyprComingSoon: { color: '#82B6D9', fontSize: 11, fontWeight: '600', letterSpacing: 1, marginTop: 'auto', paddingTop: 16 },
+  distroIconRail: { backgroundColor: '#1B2C37', marginTop: 10, minHeight: 142, paddingHorizontal: 14, paddingVertical: 13 },
+  distroIconRailHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  distroIconRailEyebrow: { color: '#82B6D9', fontSize: 10, fontWeight: '600', letterSpacing: 0.9 },
+  distroIconRailHint: { color: '#B6C7D1', fontSize: 9, fontWeight: '600', letterSpacing: 0.7 },
+  distroIconRailItems: { alignItems: 'flex-end', flexDirection: 'row', minHeight: 88, paddingTop: 16 },
+  distroIconSlot: { alignItems: 'center', flex: 1, justifyContent: 'flex-end' },
+  distroRailLogo: { backgroundColor: '#FFFFFF', borderRadius: 2, height: 48, width: 48 },
+  distroRailName: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', marginTop: 8 },
+  hyprDock: { alignItems: 'stretch', backgroundColor: '#1B2C37', borderRadius: 0, flexDirection: 'row', marginTop: 10, minHeight: 66 },
   hyprDockCommand: { flex: 1, justifyContent: 'center', paddingHorizontal: 10 },
-  hyprDockIndex: { color: '#499BED', fontFamily: 'monospace', fontSize: 7, fontWeight: '900' },
-  hyprDockLabel: { color: '#DAEAFF', fontSize: 8, fontWeight: '900', letterSpacing: 0.6, marginTop: 5 },
-  hyprDockValue: { color: '#499BED', fontSize: 8, fontWeight: '900', position: 'absolute', right: 8, top: 11 },
-  hyprDockDivider: { alignSelf: 'stretch', backgroundColor: '#499BED', opacity: 0.55, width: 1 },
+  hyprDockIndex: { color: '#82B6D9', fontFamily: 'monospace', fontSize: 10, fontWeight: '600' },
+  hyprDockLabel: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 0.6, marginTop: 5 },
+  hyprDockValue: { color: '#82B6D9', fontSize: 11, fontWeight: '600', position: 'absolute', right: 8, top: 11 },
+  hyprDockDivider: { alignSelf: 'stretch', backgroundColor: '#82B6D9', opacity: 0.55, width: 1 },
   menuTopbar: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', paddingTop: 16 },
   menuIdentity: { alignItems: 'center', flexDirection: 'row' },
-  menuLogo: { borderColor: '#022E5B', borderRadius: 8, borderWidth: 1, height: 42, width: 42 },
-  menuWordmark: { color: '#A1C6F6', fontSize: 18, fontWeight: '800', letterSpacing: -0.4, marginLeft: 8 },
-  menuVersion: { color: '#A1C6F6', fontSize: 7, fontWeight: '800', letterSpacing: 1.2, marginLeft: 8, marginTop: 2 },
+  menuLogo: { borderColor: '#1B2C37', borderRadius: 8, borderWidth: 1, height: 42, width: 42 },
+  menuWordmark: { color: '#B6C7D1', fontSize: 18, fontWeight: '600', letterSpacing: -0.4, marginLeft: 8 },
+  menuVersion: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 1.2, marginLeft: 8, marginTop: 2 },
   menuTopActions: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  menuIconButton: { alignItems: 'center', backgroundColor: '#022E5B', borderRadius: 8, height: 40, justifyContent: 'center', width: 40 },
-  menuIconText: { color: '#A1C6F6', fontSize: 11, fontWeight: '800' },
-  menuAccountButton: { alignItems: 'center', backgroundColor: '#DAEAFF', borderRadius: 8, flexDirection: 'row', height: 40, paddingHorizontal: 16 },
-  menuAccountDot: { backgroundColor: '#031725', borderRadius: 2, height: 5, marginRight: 7, width: 5 },
-  menuAccountText: { color: '#031725', fontSize: 10, fontWeight: '800' },
+  menuIconButton: { alignItems: 'center', backgroundColor: '#1B2C37', borderRadius: 8, height: 40, justifyContent: 'center', width: 40 },
+  menuIconText: { color: '#B6C7D1', fontSize: 11, fontWeight: '600' },
+  menuAccountButton: { alignItems: 'center', backgroundColor: '#EDF3F5', borderRadius: 8, flexDirection: 'row', height: 40, paddingHorizontal: 16 },
+  menuAccountDot: { backgroundColor: '#101C24', borderRadius: 2, height: 5, marginRight: 7, width: 5 },
+  menuAccountText: { color: '#101C24', fontSize: 10, fontWeight: '600' },
   menuHero: { marginTop: 64 },
-  historyShortcut: { alignItems: 'center', borderBottomColor: '#499BED', borderBottomWidth: 1, borderTopColor: '#499BED', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', marginTop: 32, paddingVertical: 18 },
-  historyShortcutLabel: { color: '#DAEAFF', fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
-  historyShortcutHint: { color: '#A1C6F6', fontSize: 11, marginTop: 5 },
-  historyShortcutArrow: { color: '#DAEAFF', fontSize: 21 },
+  historyShortcut: { alignItems: 'center', borderBottomColor: '#82B6D9', borderBottomWidth: 1, borderTopColor: '#82B6D9', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', marginTop: 32, paddingVertical: 18 },
+  historyShortcutLabel: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 1.2 },
+  historyShortcutHint: { color: '#B6C7D1', fontSize: 11, marginTop: 5 },
+  historyShortcutArrow: { color: '#EDF3F5', fontSize: 21 },
   menuSectionHeader: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14, marginTop: 34 },
-  menuSectionTitle: { color: '#DAEAFF', fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
-  menuSectionCount: { color: '#499BED', fontSize: 8, fontWeight: '800', letterSpacing: 1.2 },
-  premiumDistroCard: { backgroundColor: '#022E5B', borderRadius: 10, marginTop: 16, overflow: 'hidden' },
+  menuSectionTitle: { color: '#EDF3F5', fontSize: 20, fontWeight: '600', letterSpacing: -0.5 },
+  menuSectionCount: { color: '#82B6D9', fontSize: 11, fontWeight: '600', letterSpacing: 1.2 },
+  premiumDistroCard: { backgroundColor: '#1B2C37', borderRadius: 10, marginTop: 16, overflow: 'hidden' },
   premiumDistroCardPressed: { opacity: 0.82, transform: [{ scale: 0.988 }] },
-  debianPremiumCard: { backgroundColor: '#DAEAFF' },
+  debianPremiumCard: { backgroundColor: '#EDF3F5' },
   distroCardContent: { minHeight: 224, padding: 24 },
   distroCardTopline: { alignItems: 'flex-start', flexDirection: 'row', justifyContent: 'space-between' },
-  premiumDistroIcon: { backgroundColor: '#031725', borderRadius: 8, height: 48, overflow: 'hidden', padding: 3, width: 48 },
-  debianPremiumIcon: { backgroundColor: '#A1C6F6' },
+  premiumDistroIcon: { backgroundColor: '#101C24', borderRadius: 8, height: 48, overflow: 'hidden', padding: 3, width: 48 },
+  debianPremiumIcon: { backgroundColor: '#B6C7D1' },
   premiumDistroLogo: { borderRadius: 6, height: '100%', width: '100%' },
   premiumDistroContent: { marginTop: 24 },
-  premiumDistroTitle: { color: '#A1C6F6', fontSize: 25, fontWeight: '800', letterSpacing: -0.7 },
-  premiumDistroDescription: { color: '#A1C6F6', fontSize: 13, lineHeight: 20, marginTop: 8, maxWidth: 310 },
-  debianDistroTitle: { color: '#031725' },
-  debianDistroDescription: { color: '#031725' },
+  premiumDistroTitle: { color: '#B6C7D1', fontSize: 25, fontWeight: '600', letterSpacing: -0.7 },
+  premiumDistroDescription: { color: '#B6C7D1', fontSize: 13, lineHeight: 20, marginTop: 8, maxWidth: 310 },
+  debianDistroTitle: { color: '#101C24' },
+  debianDistroDescription: { color: '#101C24' },
   distroCardFooter: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 'auto', paddingTop: 20 },
-  distroCapability: { color: '#A1C6F6', fontSize: 7, fontWeight: '800', letterSpacing: 1.1 },
-  debianDistroCapability: { color: '#031725' },
+  distroCapability: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 1.1 },
+  debianDistroCapability: { color: '#101C24' },
   distroArrowCircle: { alignItems: 'flex-end', height: 32, justifyContent: 'center', width: 32 },
-  distroArrow: { color: '#DAEAFF', fontSize: 22, fontWeight: '400' },
-  debianDistroArrow: { color: '#031725' },
-  futureDistroCard: { alignItems: 'center', backgroundColor: '#022E5B', borderRadius: 10, flexDirection: 'row', marginTop: 16, padding: 16 },
+  distroArrow: { color: '#EDF3F5', fontSize: 22, fontWeight: '400' },
+  debianDistroArrow: { color: '#101C24' },
+  futureDistroCard: { alignItems: 'center', backgroundColor: '#1B2C37', borderRadius: 10, flexDirection: 'row', marginTop: 16, padding: 16 },
   futureDistroIcon: { borderRadius: 7, height: 38, opacity: 0.55, overflow: 'hidden', width: 38 },
   futureDistroLogo: { height: '100%', width: '100%' },
   futureDistroText: { flex: 1, marginLeft: 12 },
-  futureDistroTitle: { color: '#A1C6F6', fontSize: 13, fontWeight: '800' },
-  futureDistroDescription: { color: '#A1C6F6', fontSize: 10, marginTop: 4 },
-  futureBadge: { color: '#A1C6F6', fontSize: 7, fontWeight: '800', letterSpacing: 1.2 },
+  futureDistroTitle: { color: '#B6C7D1', fontSize: 13, fontWeight: '600' },
+  futureDistroDescription: { color: '#B6C7D1', fontSize: 10, marginTop: 4 },
+  futureBadge: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 1.2 },
   menuTrustRow: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 24 },
   menuTrustItem: { alignItems: 'center', flexDirection: 'row' },
-  trustDot: { backgroundColor: '#DAEAFF', borderRadius: 1, height: 4, marginRight: 7, width: 4 },
-  menuTrustText: { color: '#A1C6F6', fontSize: 8, fontWeight: '800' },
-  menuTrustDivider: { color: '#499BED', marginHorizontal: 8 },
+  trustDot: { backgroundColor: '#EDF3F5', borderRadius: 1, height: 4, marginRight: 7, width: 4 },
+  menuTrustText: { color: '#B6C7D1', fontSize: 11, fontWeight: '600' },
+  menuTrustDivider: { color: '#82B6D9', marginHorizontal: 8 },
   menuTools: { flexDirection: 'row', gap: 10, marginTop: 22 },
-  toolButton: { borderColor: '#022E5B', borderRadius: 8, borderWidth: 1, flex: 1, padding: 13 },
-  toolButtonText: { color: '#DAEAFF', fontSize: 11, fontWeight: '800', textAlign: 'center' },
-  distroLoadingOverlay: { alignItems: 'center', backgroundColor: '#031725', bottom: 0, justifyContent: 'center', left: 0, padding: 24, position: 'absolute', right: 0, top: 0, zIndex: 10 },
+  toolButton: { borderColor: '#1B2C37', borderRadius: 8, borderWidth: 1, flex: 1, padding: 13 },
+  toolButtonText: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  distroLoadingOverlay: { alignItems: 'center', backgroundColor: '#101C24', bottom: 0, justifyContent: 'center', left: 0, padding: 24, position: 'absolute', right: 0, top: 0, zIndex: 10 },
   loadingLogoStage: { alignItems: 'center', height: 142, justifyContent: 'center', position: 'relative', width: 142 },
   loadingOrbitOuter: { borderRadius: 0, borderWidth: 3, height: 124, position: 'absolute', width: 124 },
   loadingOrbitInner: { borderRadius: 0, borderWidth: 1, height: 104, position: 'absolute', width: 104 },
   distroLoadingLogo: { borderRadius: 6, height: 78, width: 78 },
-  distroLoadingTitle: { color: '#A1C6F6', fontSize: 22, fontWeight: '800', letterSpacing: 1.4, marginTop: 24 },
-  distroLoadingText: { color: '#DAEAFF', fontSize: 9, fontWeight: '800', letterSpacing: 1.8, marginTop: 9 },
+  distroLoadingTitle: { color: '#B6C7D1', fontSize: 22, fontWeight: '600', letterSpacing: 1.4, marginTop: 24 },
+  distroLoadingText: { color: '#EDF3F5', fontSize: 12, fontWeight: '600', letterSpacing: 1.8, marginTop: 9 },
   loadingProgressTrack: { height: 2, marginTop: 20, overflow: 'hidden', width: 150 },
   loadingProgressFill: { height: 2, transformOrigin: 'left center', width: '100%' },
-  modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(3,23,37,0.94)', bottom: 0, justifyContent: 'center', left: 0, padding: 24, position: 'absolute', right: 0, top: 0, zIndex: 20 },
-  modalCard: { backgroundColor: '#022E5B', borderRadius: 0, padding: 24, width: '100%' },
+  modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(3,23,37,0.94)', bottom: 0, justifyContent: 'center', left: 0, padding: 16, position: 'absolute', right: 0, top: 0, zIndex: 20 },
+  modalCard: { backgroundColor: '#1B2C37', borderRadius: 16, padding: 24, width: '100%' },
   settingsCard: { height: '88%', maxHeight: '88%' },
   settingsScroll: { flexShrink: 1, minHeight: 0 },
   settingsScrollContent: { paddingBottom: 8 },
-  modalTitle: { color: '#DAEAFF', fontSize: 23, fontWeight: '900', letterSpacing: -0.5, marginBottom: 24 },
-  modalLabel: { color: '#DAEAFF', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginTop: 16 },
+  modalTitle: { backgroundColor: '#101C24', borderRadius: 10, padding: 18, color: '#EDF3F5', fontSize: 21, fontWeight: '500', marginBottom: 16 },
+  modalLabel: { backgroundColor: '#101C24', borderRadius: 8, padding: 12, color: '#B6C7D1', fontSize: 11, fontWeight: '500', marginTop: 20 },
   choiceRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  choice: { borderColor: '#499BED', borderRadius: 0, borderWidth: 1, flex: 1, padding: 12 },
-  choiceActive: { backgroundColor: '#DAEAFF', borderColor: '#DAEAFF' },
-  choiceText: { color: '#A1C6F6', fontSize: 11, fontWeight: '800', textAlign: 'center' },
-  choiceTextActive: { color: '#031725' },
+  choice: { borderColor: '#526773', borderRadius: 10, borderWidth: 1, flex: 1, padding: 12 },
+  choiceActive: { backgroundColor: '#EDF3F5', borderColor: '#EDF3F5' },
+  choiceText: { color: '#B6C7D1', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  choiceTextActive: { color: '#101C24' },
   colorThemeGrid: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  colorThemeChoice: { backgroundColor: '#031725', borderColor: '#499BED', borderRadius: 0, borderWidth: 1, flex: 1, minHeight: 106, padding: 12 },
-  colorThemeChoiceActive: { backgroundColor: '#DAEAFF', borderColor: '#DAEAFF' },
+  colorThemeChoice: { backgroundColor: '#101C24', borderColor: '#526773', borderRadius: 10, borderWidth: 1, flex: 1, minHeight: 106, padding: 12 },
+  colorThemeChoiceActive: { backgroundColor: '#EDF3F5', borderColor: '#EDF3F5' },
   colorPreview: { flexDirection: 'row', gap: 4 },
   colorPreviewBar: { flex: 1, height: 18 },
-  colorThemeTitle: { color: '#DAEAFF', fontSize: 10, fontWeight: '900', letterSpacing: 0.8, marginTop: 12 },
-  colorThemeTitleActive: { color: '#031725' },
-  colorThemeDescription: { color: '#499BED', fontSize: 9, lineHeight: 13, marginTop: 4 },
+  colorThemeTitle: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', letterSpacing: 0.8, marginTop: 12 },
+  colorThemeTitleActive: { color: '#101C24' },
+  colorThemeDescription: { color: '#82B6D9', fontSize: 12, lineHeight: 13, marginTop: 4 },
   fontThemeGrid: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  fontThemeChoice: { backgroundColor: '#031725', borderColor: '#499BED', borderRadius: 0, borderWidth: 1, flex: 1, minHeight: 136, paddingHorizontal: 8, paddingVertical: 14 },
-  fontThemeChoiceActive: { backgroundColor: '#DAEAFF', borderColor: '#DAEAFF' },
-  fontThemeSample: { color: '#DAEAFF', fontSize: 27, lineHeight: 32 },
+  fontThemeChoice: { backgroundColor: '#101C24', borderColor: '#526773', borderRadius: 10, borderWidth: 1, flex: 1, minHeight: 136, paddingHorizontal: 8, paddingVertical: 14 },
+  fontThemeChoiceActive: { backgroundColor: '#EDF3F5', borderColor: '#EDF3F5' },
+  fontThemeSample: { color: '#EDF3F5', fontSize: 27, lineHeight: 32 },
   fontThemeSampleSystem: { fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif' },
-  fontThemeSampleActive: { color: '#031725' },
-  fontThemeTitle: { color: '#DAEAFF', fontSize: 9, fontWeight: '900', letterSpacing: 0.5, marginTop: 9 },
-  fontThemeTitleActive: { color: '#031725' },
-  fontThemeDescription: { color: '#499BED', fontSize: 9, lineHeight: 13, marginTop: 5 },
+  fontThemeSampleActive: { color: '#101C24' },
+  fontThemeTitle: { color: '#EDF3F5', fontSize: 12, fontWeight: '600', letterSpacing: 0.5, marginTop: 9 },
+  fontThemeTitleActive: { color: '#101C24' },
+  fontThemeDescription: { color: '#82B6D9', fontSize: 12, lineHeight: 13, marginTop: 5 },
   fontThemeTerminalSample: { fontSize: 30, fontWeight: '700', lineHeight: 34 },
   fontThemeTerminalTitle: { fontSize: 10, fontWeight: '700' },
-  fontThemeTerminalDescription: { fontSize: 9, lineHeight: 13 },
-  soundSetting: { alignItems: 'center', backgroundColor: '#031725', borderRadius: 0, flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, padding: 14 },
-  soundSettingTitle: { color: '#DAEAFF', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
-  soundSettingDescription: { color: '#A1C6F6', fontSize: 9, lineHeight: 14, marginTop: 4, maxWidth: 220 },
-  soundIndicator: { alignItems: 'center', borderColor: '#499BED', borderRadius: 0, borderWidth: 1, height: 28, justifyContent: 'center', width: 28 },
-  soundIndicatorActive: { backgroundColor: '#DAEAFF', borderColor: '#DAEAFF' },
-  soundIndicatorCore: { backgroundColor: '#499BED', height: 6, width: 6 },
-  soundIndicatorCoreActive: { backgroundColor: '#031725' },
-  modalClose: { backgroundColor: '#DAEAFF', borderRadius: 0, marginTop: 24, padding: 16 },
-  modalCloseText: { color: '#031725', fontSize: 11, fontWeight: '800', textAlign: 'center' },
-  modalCancel: { color: '#A1C6F6', fontSize: 10, fontWeight: '800', marginTop: 16, textAlign: 'center' },
-  modalLink: { color: '#DAEAFF', fontSize: 11, fontWeight: '800', marginTop: 16, textAlign: 'center' },
+  fontThemeTerminalDescription: { fontSize: 12, lineHeight: 13 },
+  soundSetting: { alignItems: 'center', backgroundColor: '#101C24', borderRadius: 16, flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, padding: 14 },
+  soundSettingTitle: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', letterSpacing: 0.8 },
+  soundSettingDescription: { color: '#B6C7D1', fontSize: 12, lineHeight: 14, marginTop: 4, maxWidth: 220 },
+  soundIndicator: { alignItems: 'center', borderColor: '#82B6D9', borderRadius: 0, borderWidth: 1, height: 28, justifyContent: 'center', width: 28 },
+  soundIndicatorActive: { backgroundColor: '#EDF3F5', borderColor: '#EDF3F5' },
+  soundIndicatorCore: { backgroundColor: '#82B6D9', height: 6, width: 6 },
+  soundIndicatorCoreActive: { backgroundColor: '#101C24' },
+  modalClose: { backgroundColor: '#EDF3F5', borderRadius: 10, marginTop: 24, padding: 16 },
+  modalCloseText: { color: '#101C24', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  modalCancel: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#B6C7D1', fontSize: 10, fontWeight: '600', marginTop: 16, textAlign: 'center' },
+  modalLink: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#EDF3F5', fontSize: 11, fontWeight: '600', marginTop: 16, textAlign: 'center' },
   legalButtons: { gap: 8, marginTop: 8 },
-  legalButton: { borderBottomColor: '#499BED', borderBottomWidth: 1, paddingVertical: 11 },
-  legalButtonText: { color: '#A1C6F6', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  settingsWindowPath: { color: '#499BED', fontFamily: 'monospace', fontSize: 9, fontWeight: '900', letterSpacing: 0.8, marginBottom: 8, marginTop: -12 },
-  settingsRoute: { alignItems: 'center', borderBottomColor: '#499BED', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 76, paddingVertical: 14 },
-  settingsRouteTitle: { color: '#DAEAFF', fontSize: 11, fontWeight: '900', letterSpacing: 0.7 },
-  settingsRouteDescription: { color: '#A1C6F6', fontSize: 10, lineHeight: 15, marginTop: 5, maxWidth: 260 },
-  settingsRouteArrow: { color: '#DAEAFF', fontSize: 20 },
-  permissionState: { borderColor: '#499BED', borderWidth: 1, height: 12, width: 12 },
-  permissionStateActive: { backgroundColor: '#DAEAFF' },
+  legalButton: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, minHeight: 48 },
+  legalButtonText: { color: '#B6C7D1', fontSize: 11, fontWeight: '600', letterSpacing: 0.5 },
+  settingsWindowPath: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#82B6D9', fontFamily: 'monospace', fontSize: 12, fontWeight: '600', letterSpacing: 0.8, marginBottom: 8, marginTop: -12 },
+  settingsRoute: { backgroundColor: '#101C24', borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 84, marginTop: 10, padding: 16 },
+  settingsRouteTitle: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 0.7 },
+  settingsRouteDescription: { color: '#B6C7D1', fontSize: 10, lineHeight: 15, marginTop: 5, maxWidth: 260 },
+  settingsRouteArrow: { color: '#EDF3F5', fontSize: 20 },
+  permissionState: { borderColor: '#82B6D9', borderWidth: 1, height: 12, width: 12 },
+  permissionStateActive: { backgroundColor: '#EDF3F5' },
   exitAppButton: { borderColor: '#C40361', borderWidth: 1, marginTop: 26, padding: 15 },
-  exitAppText: { color: '#FFE9F8', fontSize: 10, fontWeight: '900', letterSpacing: 1, textAlign: 'center' },
-  consentStatus: { color: '#A1C6F6', fontSize: 11, lineHeight: 17, marginTop: 14, textAlign: 'center' },
-  consentIntro: { color: '#A1C6F6', fontSize: 13, lineHeight: 20 },
+  exitAppText: { color: '#FFE9F8', fontSize: 10, fontWeight: '600', letterSpacing: 1, textAlign: 'center' },
+  consentStatus: { color: '#B6C7D1', fontSize: 11, lineHeight: 17, marginTop: 14, textAlign: 'center' },
+  consentIntro: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#B6C7D1', fontSize: 13, lineHeight: 20 },
   consentRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 12, marginTop: 18 },
-  consentBox: { alignItems: 'center', borderColor: '#DAEAFF', borderRadius: 0, borderWidth: 1, height: 22, justifyContent: 'center', width: 22 },
-  consentBoxActive: { backgroundColor: '#DAEAFF' },
-  consentMark: { color: '#031725', fontSize: 14, fontWeight: '900' },
-  consentText: { color: '#A1C6F6', flex: 1, fontSize: 12, lineHeight: 18 },
+  consentBox: { alignItems: 'center', borderColor: '#EDF3F5', borderRadius: 0, borderWidth: 1, height: 22, justifyContent: 'center', width: 22 },
+  consentBoxActive: { backgroundColor: '#EDF3F5' },
+  consentMark: { color: '#101C24', fontSize: 14, fontWeight: '600' },
+  consentText: { color: '#B6C7D1', flex: 1, fontSize: 12, lineHeight: 18 },
   legalBackdrop: { zIndex: 30 },
   legalCard: { maxHeight: '88%' },
   legalScroll: { maxHeight: 480 },
-  legalText: { color: '#A1C6F6', fontSize: 12, lineHeight: 19 },
-  deleteAccountButton: { borderColor: '#A1C6F6', borderRadius: 0, borderWidth: 1, marginTop: 12, padding: 13 },
-  deleteAccountText: { color: '#A1C6F6', fontSize: 10, fontWeight: '800', textAlign: 'center' },
-  modalInput: { backgroundColor: '#031725', borderColor: '#499BED', borderRadius: 0, borderWidth: 1, color: '#A1C6F6', marginTop: 8, padding: 16 },
-  accountOk: { color: '#DAEAFF', fontSize: 14, lineHeight: 21 },
-  accountHistoryLink: { borderBottomColor: '#499BED', borderBottomWidth: 1, borderTopColor: '#499BED', borderTopWidth: 1, marginTop: 20, paddingVertical: 14 },
-  accountHistoryLinkText: { color: '#A1C6F6', fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  legalText: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#B6C7D1', fontSize: 12, lineHeight: 19 },
+  deleteAccountButton: { borderColor: '#B6C7D1', borderRadius: 10, borderWidth: 1, marginTop: 12, padding: 13 },
+  deleteAccountText: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  modalInput: { backgroundColor: '#101C24', borderColor: '#526773', borderRadius: 10, borderWidth: 1, color: '#B6C7D1', marginTop: 8, padding: 16 },
+  accountOk: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#EDF3F5', fontSize: 14, lineHeight: 21 },
+  accountHistoryLink: { borderBottomColor: '#82B6D9', borderBottomWidth: 1, borderTopColor: '#82B6D9', borderTopWidth: 1, marginTop: 20, paddingVertical: 14 },
+  accountHistoryLinkText: { color: '#B6C7D1', fontSize: 11, fontWeight: '600', textAlign: 'center' },
   historyModalCard: { maxHeight: '86%' },
-  historyIntro: { backgroundColor: '#031725', borderRadius: 0, color: '#A1C6F6', fontSize: 12, lineHeight: 18, padding: 14 },
+  historyIntro: { backgroundColor: '#101C24', borderRadius: 16, color: '#B6C7D1', fontSize: 12, lineHeight: 18, padding: 14 },
   historyList: { maxHeight: 420, marginTop: 8 },
-  historyEmpty: { color: '#A1C6F6', fontSize: 13, paddingVertical: 28, textAlign: 'center' },
-  historyItem: { borderBottomColor: '#499BED', borderBottomWidth: 1, flexDirection: 'row', paddingVertical: 18 },
-  historyMarker: { backgroundColor: '#A1C6F6', height: 7, marginRight: 12, marginTop: 4, width: 7 },
-  historyMarkerAi: { backgroundColor: '#DAEAFF' },
+  historyEmpty: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#B6C7D1', fontSize: 13, paddingVertical: 28, textAlign: 'center' },
+  historyItem: { backgroundColor: '#101C24', borderRadius: 12, flexDirection: 'row', padding: 16, marginTop: 12 },
+  historyMarker: { backgroundColor: '#B6C7D1', height: 7, marginRight: 12, marginTop: 4, width: 7 },
+  historyMarkerAi: { backgroundColor: '#EDF3F5' },
   historyBody: { flex: 1 },
-  historyItemHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
-  historyRole: { color: '#DAEAFF', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
-  historyDate: { color: '#499BED', fontSize: 9 },
-  historyContent: { color: '#A1C6F6', fontSize: 12, lineHeight: 17, marginTop: 4 },
-  menuTitle: { color: '#DAEAFF', fontSize: 38, fontWeight: '900', letterSpacing: -1.7, lineHeight: 42, marginTop: 0 },
-  menuSubtitle: { color: '#A1C6F6', fontSize: 13, lineHeight: 20, marginTop: 18, maxWidth: 335 },
-  arrow: { fontSize: 20, fontWeight: '900' },
-  topline: { alignItems: 'center', backgroundColor: '#022E5B', borderRadius: 0, flexDirection: 'row', gap: 8, minHeight: 52, paddingHorizontal: 10 },
+  historyItemHeader: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 },
+  historyRole: { color: '#EDF3F5', fontSize: 12, fontWeight: '600', letterSpacing: 1 },
+  historyDate: { color: '#82B6D9', fontSize: 12 },
+  historyContent: { color: '#B6C7D1', fontSize: 14, lineHeight: 22, marginTop: 10 },
+  menuTitle: { color: '#EDF3F5', fontSize: 38, fontWeight: '600', letterSpacing: -1.7, lineHeight: 42, marginTop: 0 },
+  menuSubtitle: { color: '#B6C7D1', fontSize: 13, lineHeight: 20, marginTop: 18, maxWidth: 335 },
+  arrow: { fontSize: 20, fontWeight: '600' },
+  topline: { alignItems: 'center', backgroundColor: '#1B2C37', borderRadius: 12, flexDirection: 'row', gap: 8, minHeight: 52, paddingHorizontal: 10 },
   backButton: { alignItems: 'center', height: 38, justifyContent: 'center', width: 30 },
   backArrow: { fontSize: 32, fontWeight: '300', lineHeight: 32 },
-  brand: { color: '#DAEAFF', fontSize: 16, fontWeight: '800', letterSpacing: 4 },
-  badge: { backgroundColor: '#022E5B', borderRadius: 4, color: '#DAEAFF', fontSize: 10, fontWeight: '800', paddingHorizontal: 7, paddingVertical: 4 },
-  distroPill: { fontSize: 10, fontWeight: '800', letterSpacing: 1, marginLeft: 'auto' },
-  workspaceSignal: { backgroundColor: '#022E5B', borderLeftWidth: 3, borderRadius: 0, marginTop: 12, padding: 18 },
-  workspaceEyebrow: { fontSize: 9, fontWeight: '800', letterSpacing: 1.8 },
-  workspaceDistro: { color: '#A1C6F6', fontSize: 27, fontWeight: '800', letterSpacing: -0.8, marginTop: 6 },
-  workspaceDescription: { color: '#A1C6F6', fontSize: 13, lineHeight: 19, marginTop: 7 },
-  title: { color: '#DAEAFF', fontSize: 35, fontWeight: '900', letterSpacing: -1.1, lineHeight: 40, marginTop: 34 },
-  subtitle: { color: '#A1C6F6', fontSize: 15, lineHeight: 23, marginTop: 13 },
-  diagnosticStrip: { backgroundColor: '#022E5B', borderRadius: 0, flexDirection: 'row', marginTop: 26, padding: 15 },
+  brand: { color: '#EDF3F5', fontSize: 16, fontWeight: '600', letterSpacing: 4 },
+  badge: { backgroundColor: '#1B2C37', borderRadius: 4, color: '#EDF3F5', fontSize: 10, fontWeight: '600', paddingHorizontal: 7, paddingVertical: 4 },
+  distroPill: { fontSize: 10, fontWeight: '600', letterSpacing: 1, marginLeft: 'auto' },
+  workspaceSignal: { backgroundColor: '#1B2C37', borderLeftWidth: 0, borderRadius: 16, marginTop: 28, padding: 24 },
+  workspaceEyebrow: { fontSize: 12, fontWeight: '600', letterSpacing: 1.8 },
+  workspaceDistro: { color: '#B6C7D1', fontSize: 27, fontWeight: '600', letterSpacing: -0.8, marginTop: 6 },
+  workspaceDescription: { color: '#B6C7D1', fontSize: 13, lineHeight: 19, marginTop: 7 },
+  title: { color: '#EDF3F5', fontSize: 25, fontWeight: '500', lineHeight: 33 },
+  subtitle: { color: '#B6C7D1', fontSize: 14, lineHeight: 22, marginTop: 10 },
+  diagnosticStrip: { backgroundColor: '#1B2C37', borderRadius: 16, flexDirection: 'row', marginTop: 26, padding: 15 },
   diagnosticStripItem: { flex: 1 },
-  diagnosticStripDivider: { backgroundColor: '#499BED', marginHorizontal: 16, width: 1 },
-  diagnosticStripLabel: { color: '#DAEAFF', fontSize: 8, fontWeight: '800', letterSpacing: 1.2 },
-  diagnosticStripValue: { color: '#A1C6F6', fontSize: 11, fontWeight: '800', marginTop: 6 },
-  status: { alignItems: 'center', borderBottomColor: '#499BED', borderBottomWidth: 1, flexDirection: 'row', marginTop: 10, paddingHorizontal: 4, paddingVertical: 13 },
-  statusDot: { backgroundColor: '#499BED', borderRadius: 2, height: 8, marginRight: 9, width: 8 },
-  statusDotOnline: { backgroundColor: '#DAEAFF' },
-  statusDotOffline: { backgroundColor: '#A1C6F6' },
-  statusText: { color: '#A1C6F6', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-  aiStatusText: { color: '#DAEAFF', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginLeft: 'auto' },
-  label: { color: '#A1C6F6', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8, marginTop: 32 },
-  terminalFrame: { backgroundColor: '#022E5B', borderRadius: 0, marginTop: 28, overflow: 'hidden' },
-  terminalTitlebar: { alignItems: 'center', backgroundColor: '#499BED', flexDirection: 'row', justifyContent: 'space-between', minHeight: 30, paddingHorizontal: 12 },
-  terminalTitle: { color: '#031725', fontFamily: 'monospace', fontSize: 8, fontWeight: '900', letterSpacing: 0.7 },
-  terminalCounter: { color: '#031725', fontFamily: 'monospace', fontSize: 8, fontWeight: '900' },
-  inputShell: { backgroundColor: '#022E5B', borderColor: 'transparent', borderWidth: 1, height: 158, overflow: 'hidden', position: 'relative' },
-  inputShellLight: { backgroundColor: '#DAEAFF' },
-  inputShellFocused: { borderColor: '#DAEAFF' },
-  input: { color: '#A1C6F6', fontFamily: 'monospace', fontSize: 14, height: '100%', lineHeight: 21, padding: 15 },
-  typingRail: { backgroundColor: '#499BED', bottom: 11, height: 1, left: 15, position: 'absolute', right: 15 },
-  typingMotionTrail: { backgroundColor: '#499BED', bottom: 5, height: 12, left: 15, position: 'absolute', width: 88 },
-  typingPulseBlur: { backgroundColor: '#DAEAFF', bottom: 8, height: 7, left: 15, position: 'absolute', width: 72 },
-  typingPulse: { backgroundColor: '#DAEAFF', bottom: 10, height: 2, left: 15, position: 'absolute', width: 54 },
-  actions: { gap: 8, marginTop: 16 },
-  primaryButton: { alignItems: 'center', backgroundColor: '#DAEAFF', borderRadius: 0, padding: 16 },
-  primaryText: { color: '#031725', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  diagnosticStripDivider: { backgroundColor: '#82B6D9', marginHorizontal: 16, width: 1 },
+  diagnosticStripLabel: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 1.2 },
+  diagnosticStripValue: { color: '#B6C7D1', fontSize: 11, fontWeight: '600', marginTop: 6 },
+  status: { alignItems: 'center', backgroundColor: '#1B2C37', borderRadius: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16, padding: 16 },
+  statusDot: { backgroundColor: '#82B6D9', borderRadius: 2, height: 8, marginRight: 9, width: 8 },
+  statusDotOnline: { backgroundColor: '#EDF3F5' },
+  statusDotOffline: { backgroundColor: '#B6C7D1' },
+  statusText: { color: '#B6C7D1', fontSize: 11, fontWeight: '600', letterSpacing: 1 },
+  aiStatusText: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginLeft: 'auto' },
+  label: { color: '#B6C7D1', fontSize: 11, fontWeight: '600', letterSpacing: 1.5, marginBottom: 8, marginTop: 32 },
+  terminalFrame: { backgroundColor: '#101C24', borderRadius: 10, marginTop: 18, overflow: 'hidden' },
+  terminalTitlebar: { alignItems: 'center', backgroundColor: '#263B49', flexDirection: 'row', justifyContent: 'space-between', minHeight: 38, paddingHorizontal: 14 },
+  terminalTitle: { color: '#B6C7D1', fontSize: 11, fontWeight: '500' },
+  terminalCounter: { color: '#B6C7D1', fontSize: 10 },
+  inputShell: { backgroundColor: '#101C24', borderColor: 'transparent', borderWidth: 1, height: 180, overflow: 'hidden', position: 'relative' },
+  inputShellLight: { backgroundColor: '#EDF3F5' },
+  inputShellFocused: { borderColor: '#EDF3F5' },
+  input: { color: '#EDF3F5', fontSize: 15, height: '100%', lineHeight: 24, padding: 16 },
+  typingRail: { backgroundColor: '#82B6D9', bottom: 11, height: 1, left: 15, position: 'absolute', right: 15 },
+  typingMotionTrail: { backgroundColor: '#82B6D9', bottom: 5, height: 12, left: 15, position: 'absolute', width: 88 },
+  typingPulseBlur: { backgroundColor: '#EDF3F5', bottom: 8, height: 7, left: 15, position: 'absolute', width: 72 },
+  typingPulse: { backgroundColor: '#EDF3F5', bottom: 10, height: 2, left: 15, position: 'absolute', width: 54 },
+  actions: { gap: 10, marginTop: 18 },
+  primaryButton: { alignItems: 'center', backgroundColor: '#82B6D9', borderRadius: 10, padding: 18, minHeight: 54 },
+  primaryText: { color: '#101C24', fontSize: 12, fontWeight: '600', letterSpacing: 1 },
   buttonDisabled: { opacity: 0.45 },
   buttonPressed: { opacity: 0.78 },
   loadingButtonContent: { alignItems: 'center', flexDirection: 'row', gap: 9 },
-  buttonSpinner: { borderColor: '#499BED', borderRadius: 8, borderRightColor: '#DAEAFF', borderTopColor: '#A1C6F6', borderWidth: 2, height: 16, width: 16 },
-  aiLoadingHint: { color: '#A1C6F6', fontSize: 11, lineHeight: 16, paddingHorizontal: 8, textAlign: 'center' },
-  secondaryButton: { alignItems: 'center', borderColor: '#499BED', borderRadius: 0, borderWidth: 1, padding: 14 },
-  secondaryText: { color: '#DAEAFF', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
-  exampleButton: { alignItems: 'center', padding: 10 },
-  exampleButtonText: { color: '#A1C6F6', fontSize: 11, fontWeight: '700' },
-  backendLabel: { color: '#A1C6F6', fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginTop: 16 },
-  backendInput: { backgroundColor: '#022E5B', borderColor: '#499BED', borderRadius: 0, borderWidth: 1, color: '#DAEAFF', fontFamily: 'monospace', fontSize: 12, marginTop: 8, padding: 12 },
-  backendHint: { color: '#499BED', fontSize: 11, lineHeight: 16, marginTop: 6 },
-  hostToggle: { marginTop: 16, paddingVertical: 8 },
-  hostToggleText: { color: '#DAEAFF', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  aiError: { color: '#A1C6F6', fontSize: 13, lineHeight: 19, marginTop: 12 },
-  resultCard: { backgroundColor: '#022E5B', borderRadius: 0, marginTop: 24, padding: 24 },
-  resultEyebrow: { color: '#DAEAFF', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  resultTitle: { color: '#A1C6F6', fontSize: 24, fontWeight: '800', marginTop: 8 },
-  resultSummary: { color: '#A1C6F6', fontSize: 14, lineHeight: 21, marginTop: 10 },
-  commandLabel: { color: '#499BED', fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginTop: 20 },
-  command: { backgroundColor: '#031725', borderRadius: 0, marginTop: 8, padding: 11 },
-  commandText: { color: '#DAEAFF', fontFamily: 'monospace', fontSize: 12 },
-  sourceButton: { marginTop: 16 },
-  sourceText: { color: '#DAEAFF', fontSize: 13, fontWeight: '800' },
+  buttonSpinner: { borderColor: '#82B6D9', borderRadius: 8, borderRightColor: '#EDF3F5', borderTopColor: '#B6C7D1', borderWidth: 2, height: 16, width: 16 },
+  aiLoadingHint: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#B6C7D1', fontSize: 11, lineHeight: 16, paddingHorizontal: 8, textAlign: 'center' },
+  secondaryButton: { alignItems: 'center', borderColor: '#526773', borderRadius: 10, borderWidth: 1, padding: 14 },
+  secondaryText: { color: '#EDF3F5', fontSize: 12, fontWeight: '600', letterSpacing: 1 },
+  exampleButton: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, alignItems: 'center' },
+  exampleButtonText: { color: '#B6C7D1', fontSize: 11, fontWeight: '700' },
+  backendLabel: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 1.2, marginTop: 16 },
+  backendInput: { backgroundColor: '#1B2C37', borderColor: '#526773', borderRadius: 0, borderWidth: 1, color: '#EDF3F5', fontFamily: 'monospace', fontSize: 12, marginTop: 8, padding: 12 },
+  backendHint: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, color: '#82B6D9', fontSize: 11, lineHeight: 16, marginTop: 6 },
+  hostToggle: { backgroundColor: '#1B2C37', borderRadius: 12, marginTop: 16, padding: 20 },
+  hostToggleText: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', letterSpacing: 1 },
+  aiError: { color: '#B6C7D1', fontSize: 13, lineHeight: 19, marginTop: 12 },
+  resultCard: { backgroundColor: '#1B2C37', borderRadius: 16, marginTop: 24, padding: 24 },
+  resultEyebrow: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', letterSpacing: 1.5 },
+  resultTitle: { color: '#B6C7D1', fontSize: 24, fontWeight: '600', marginTop: 8 },
+  resultSummary: { color: '#B6C7D1', fontSize: 14, lineHeight: 21, marginTop: 10 },
+  commandLabel: { color: '#82B6D9', fontSize: 10, fontWeight: '600', letterSpacing: 1.5, marginTop: 20 },
+  command: { backgroundColor: '#101C24', borderRadius: 10, marginTop: 8, padding: 11 },
+  commandText: { color: '#EDF3F5', fontFamily: 'monospace', fontSize: 12 },
+  sourceButton: { backgroundColor: '#101C24', borderRadius: 10, padding: 16, marginTop: 16 },
+  sourceText: { color: '#EDF3F5', fontSize: 13, fontWeight: '600' },
   aiSources: { marginTop: 8 },
   aiSourceLink: { paddingVertical: 8 },
-  aiCard: { backgroundColor: '#022E5B', borderRadius: 0, marginTop: 24, padding: 24 },
+  aiCard: { backgroundColor: '#1B2C37', borderRadius: 16, marginTop: 24, padding: 24 },
   aiCardHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   aiLiveStatus: { alignItems: 'center', flexDirection: 'row', gap: 6 },
-  aiLiveDot: { backgroundColor: '#DAEAFF', height: 5, width: 5 },
-  aiLiveText: { color: '#DAEAFF', fontSize: 8, fontWeight: '900', letterSpacing: 1 },
-  aiLiveWindow: { borderRadius: 0, borderWidth: 1, marginTop: 24, overflow: 'hidden', position: 'relative' },
-  aiLiveWindowBar: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 34, paddingHorizontal: 12 },
+  aiLiveDot: { backgroundColor: '#EDF3F5', height: 5, width: 5 },
+  aiLiveText: { color: '#EDF3F5', fontSize: 11, fontWeight: '600', letterSpacing: 1 },
+  aiLiveWindow: { borderRadius: 14, borderWidth: 0, marginTop: 20, overflow: 'hidden', position: 'relative' },
+  aiLiveWindowBar: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', minHeight: 56, padding: 16 },
   aiLiveWindowIdentity: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   aiLiveWindowSignal: { height: 6, width: 6 },
-  aiLiveWindowTitle: { fontSize: 8, fontWeight: '900', letterSpacing: 1.1 },
-  aiLiveWindowState: { fontSize: 8, fontWeight: '900', letterSpacing: 0.9 },
+  aiLiveWindowTitle: { fontSize: 11, fontWeight: '600', letterSpacing: 1.1 },
+  aiLiveWindowState: { fontSize: 11, fontWeight: '600', letterSpacing: 0.9 },
   aiLiveProgressTrack: { height: 3, overflow: 'hidden', width: '100%' },
   aiLiveProgressFill: { height: 3, minWidth: 8 },
   aiWaitingBody: { minHeight: 152, paddingHorizontal: 18, paddingVertical: 22 },
-  aiTerminalPrompt: { fontFamily: 'monospace', fontSize: 10, fontWeight: '800', letterSpacing: 0.2 },
+  aiTerminalPrompt: { fontFamily: 'monospace', fontSize: 10, fontWeight: '600', letterSpacing: 0.2 },
   aiWaitingText: { fontSize: 15, lineHeight: 23, marginTop: 18 },
-  aiWaitingMeta: { fontFamily: 'monospace', fontSize: 7, fontWeight: '900', letterSpacing: 0.75, lineHeight: 12, marginTop: 22 },
+  aiWaitingMeta: { fontFamily: 'monospace', fontSize: 10, fontWeight: '600', letterSpacing: 0.75, lineHeight: 12, marginTop: 22 },
   aiLiveBody: { paddingBottom: 22, paddingHorizontal: 18, paddingTop: 20 },
-  aiLiveSectionIndex: { fontFamily: 'monospace', fontSize: 8, fontWeight: '900', letterSpacing: 1.15, marginBottom: 8 },
-  aiLiveResultTitle: { fontSize: 23, fontWeight: '900', letterSpacing: -0.5, lineHeight: 29 },
-  aiLiveSummary: { fontSize: 14, lineHeight: 21, marginTop: 10 },
+  aiLiveSectionIndex: { fontFamily: 'monospace', fontSize: 11, fontWeight: '600', letterSpacing: 1.15, marginBottom: 8 },
+  aiLiveResultTitle: { fontSize: 25, fontWeight: '500', letterSpacing: -0.5, lineHeight: 33 },
+  aiLiveSummary: { fontSize: 15, lineHeight: 24, marginTop: 14 },
   aiLiveDivider: { height: 1, marginBottom: 16, marginTop: 20, opacity: 0.72 },
-  aiLiveStep: { borderLeftWidth: 2, marginTop: 10, padding: 13 },
+  aiLiveStep: { borderLeftWidth: 0, borderRadius: 10, marginTop: 12, padding: 18 },
   aiLiveStepHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  aiLiveStepNumber: { fontFamily: 'monospace', fontSize: 8, fontWeight: '900', letterSpacing: 1 },
+  aiLiveStepNumber: { fontFamily: 'monospace', fontSize: 11, fontWeight: '600', letterSpacing: 1 },
   aiLiveCommand: { borderTopWidth: 1, marginTop: 11, paddingTop: 10 },
+  aiCommandLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 7 },
   aiLiveCommandText: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
-  aiCursor: { fontSize: 14, fontWeight: '900', lineHeight: 18 },
+  aiCursor: { fontSize: 14, fontWeight: '600', lineHeight: 18 },
   aiLiveSourceLink: { borderTopWidth: 0, paddingVertical: 7 },
-  aiLiveSourceText: { fontSize: 12, fontWeight: '800', lineHeight: 18 },
-  aiStep: { backgroundColor: '#031725', borderRadius: 0, marginTop: 10, padding: 12 },
-  aiStepDescription: { color: '#A1C6F6', fontSize: 13, lineHeight: 18 },
-  aiRisk: { color: '#A1C6F6', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginTop: 8 },
-  emptyCard: { backgroundColor: '#022E5B', borderRadius: 0, marginTop: 24, padding: 24 },
-  emptyTitle: { color: '#A1C6F6', fontSize: 17, fontWeight: '800' },
-  emptyText: { color: '#A1C6F6', fontSize: 14, lineHeight: 21, marginTop: 8 },
-  note: { borderTopColor: '#499BED', borderTopWidth: 1, marginTop: 32, paddingTop: 18 },
-  noteTitle: { color: '#DAEAFF', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  noteText: { color: '#499BED', fontSize: 12, lineHeight: 18, marginTop: 7 },
-  suggestionCard: { backgroundColor: '#022E5B', borderRadius: 0, marginTop: 24, padding: 24 },
-  suggestion: { alignItems: 'center', borderTopColor: '#499BED', borderTopWidth: 1, flexDirection: 'row', marginTop: 16, paddingTop: 16 },
+  aiLiveSourceText: { fontSize: 12, fontWeight: '600', lineHeight: 18 },
+  aiStep: { backgroundColor: '#101C24', borderRadius: 0, marginTop: 10, padding: 12 },
+  aiStepDescription: { color: '#B6C7D1', fontSize: 14, lineHeight: 23 },
+  aiRisk: { color: '#B6C7D1', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginTop: 8 },
+  emptyCard: { backgroundColor: '#1B2C37', borderRadius: 16, marginTop: 24, padding: 24 },
+  emptyTitle: { color: '#B6C7D1', fontSize: 17, fontWeight: '600' },
+  emptyText: { color: '#B6C7D1', fontSize: 14, lineHeight: 21, marginTop: 8 },
+  note: { backgroundColor: '#1B2C37', borderRadius: 12, marginTop: 16, padding: 20 },
+  noteTitle: { color: '#EDF3F5', fontSize: 10, fontWeight: '600', letterSpacing: 1.5 },
+  noteText: { color: '#82B6D9', fontSize: 12, lineHeight: 18, marginTop: 7 },
+  suggestionCard: { backgroundColor: '#1B2C37', borderRadius: 16, marginTop: 24, padding: 24 },
+  suggestion: { alignItems: 'center', borderTopColor: '#82B6D9', borderTopWidth: 1, flexDirection: 'row', marginTop: 16, paddingTop: 16 },
   suggestionText: { flex: 1 },
-  suggestionTitle: { color: '#A1C6F6', fontSize: 15, fontWeight: '800' },
-  suggestionCategory: { color: '#499BED', fontSize: 11, marginTop: 4 },
+  suggestionTitle: { color: '#B6C7D1', fontSize: 15, fontWeight: '600' },
+  suggestionCategory: { color: '#82B6D9', fontSize: 11, marginTop: 4 },
 });
 
 function rulesForDistro(distro: Distro | null): ErrorRule[] {

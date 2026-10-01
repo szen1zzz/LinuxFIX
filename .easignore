@@ -69,3 +69,10 @@ backend/data/
 media/
 release-artifacts/
 .release-check/
+
+# Server tooling and local checks are not Android build inputs
+backend/
+supabase/
+scripts/
+*.md
+.env.example

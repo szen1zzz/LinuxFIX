@@ -3,10 +3,18 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
+import { createClient } from '@supabase/supabase-js';
 
 const port = Number(process.env.PORT ?? 8787);
 const ollamaUrl = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 const model = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b';
+const supabaseUrl = process.env.SUPABASE_URL?.trim() ?? '';
+const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY?.trim() ?? '';
+const supabaseAdmin = supabaseUrl && supabaseSecretKey
+  ? createClient(supabaseUrl, supabaseSecretKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+  : null;
 const dataDirectory = join(import.meta.dirname, 'data');
 const usersFile = join(dataDirectory, 'users.json');
 const sessionsFile = join(dataDirectory, 'sessions.json');
@@ -57,11 +65,16 @@ Jeśli pytanie nie dotyczy Linuksa, krótko wyjaśnij zakres LinuxFIX i nie zgad
 Jeśli nie masz pewności, napisz to.
 Nie masz dostępu do internetu ani forum. Nie udawaj wyszukiwania.
 Używaj wyłącznie źródeł przekazanych w kontekście dla wybranej dystrybucji. Nie wymyślaj źródeł, tytułów stron ani adresów URL. Jeśli nie podano źródeł, zwróć pustą tablicę sources.
-Nie podawaj poleceń ani nazw narzędzi z innej dystrybucji. Dla Arch używaj wyłącznie poleceń Arch (np. pacman), a dla Debian używaj wyłącznie poleceń Debian (np. apt); jeśli nie wiesz, napisz to zamiast zgadywać.
+Nie podawaj poleceń ani nazw narzędzi z innej dystrybucji. Dla Arch i CachyOS używaj pacman oraz narzędzi właściwych dla wybranego systemu, dla Debiana używaj apt, dla Fedory używaj dnf/rpm, a dla NixOS używaj nix i nixos-rebuild. Jeśli nie wiesz, napisz to zamiast zgadywać.
+Dopasuj także nazwy usług do dystrybucji: serwer OpenSSH w Debianie zwykle działa jako ssh.service, a w Arch Linux i Fedorze jako sshd.service. Jeśli użytkownik prosi o ostatnie błędy, użyj filtra priorytetu i ogranicz liczbę wpisów, na przykład journalctl -u ssh.service -p err -n 50 --no-pager w Debianie.
 Nie zmieniaj znaczenia błędu. Dla "target not found" rozważ brak pakietu lub błędną nazwę, a nie awarię aplikacji.
 Nie proponuj automatycznie rm, mkfs, zmian bootloadera, chmod 777 ani innych destrukcyjnych poleceń.
-Komendy wymagające sudo oznacz jako medium lub high risk.
-Jeśli krok nie wymaga komendy, ustaw command na pusty ciąg znaków.
+Odpowiadasz także początkującym. Jeśli zadanie da się bezpiecznie wykonać w terminalu, podaj konkretną komendę w polu command każdego kroku wymagającego terminala. Nie poprzestawaj na zdaniach typu "użyj df" albo "sprawdź logi" z pustym command.
+W description napisz prostym językiem, gdzie wpisać komendę (w aplikacji Terminal) i co ona pokaże albo zmieni. Podaj kroki w kolejności wykonania. Jedna komenda na krok.
+Pole command zawiera wyłącznie gotową komendę powłoki, bez znaku zachęty $, bloków markdown, dopisków i opisów. Nie używaj fikcyjnych nazw pakietów lub usług ani placeholderów, które użytkownik mógłby bezmyślnie wkleić.
+Jeżeli brakuje koniecznej nazwy usługi, pakietu lub innej informacji, najpierw poproś o nią w description. Nie wymyślaj komendy. Gdy pytanie jest wyłącznie teoretyczne albo nie ma bezpiecznego polecenia, command może być pusty.
+Przykład dla pytania "Jak sprawdzić wolne miejsce na dysku?": {"description":"Otwórz Terminal i wpisz polecenie. Pokaże wolne miejsce na zamontowanych dyskach w czytelnych jednostkach.","command":"df -h","risk":"low"}.
+Komendy wymagające sudo oznacz jako medium lub high risk. Nie każ uruchamiać poleceń bez wyjaśnienia ich skutku.
 Zwróć wyłącznie poprawny JSON bez markdownu w formacie:
 {
   "title": "krótka nazwa problemu albo zadania",
@@ -195,6 +208,13 @@ function bearerToken(request) {
     : null;
 }
 
+function supabaseBearerToken(request) {
+  const header = request.headers.authorization;
+  return typeof header === 'string' && /^Bearer [A-Za-z0-9._-]{20,4096}$/.test(header)
+    ? header.slice(7)
+    : null;
+}
+
 async function authenticate(request) {
   const token = bearerToken(request);
   if (!token) return null;
@@ -281,6 +301,19 @@ async function deleteAccountData(request) {
     await writeData(sessionsFile, (Array.isArray(sessions) ? sessions : []).filter((session) => session.userId !== user.id));
     await writeData(historyFile, remainingHistories);
   });
+  return true;
+}
+
+async function deleteSupabaseAccount(request) {
+  if (!supabaseAdmin) return null;
+  const token = supabaseBearerToken(request);
+  if (!token) return false;
+
+  const { data, error: userError } = await supabaseAdmin.auth.getUser(token);
+  if (userError || !data.user) return false;
+
+  const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(data.user.id);
+  if (deleteError) throw deleteError;
   return true;
 }
 
@@ -381,6 +414,7 @@ function publicError(error, fallback = 'Nie udało się przetworzyć żądania.'
     'Hasło musi mieć od 8 do 128 znaków.',
     'Żądanie musi zawierać poprawny JSON.',
     'Log jest za długi (maksymalnie 100 KB).',
+    'Treść pytania jest za długa (maksymalnie 20 000 znaków).',
   ]);
   return safeMessages.has(message) ? message : fallback;
 }
@@ -458,29 +492,47 @@ function restrictSources(result, sources) {
   };
 }
 
-async function analyze(log, distro, language) {
-  const { key, sources } = sourcesForDistro(distro);
-  const responseLanguage = language === 'en' ? 'English' : 'Polish';
+async function requestModelAnalysis(prompt, language, sources, timeoutMs) {
   const ollamaResponse = await fetch(`${ollamaUrl}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       model,
-      prompt: `${systemPrompt}\n\nJęzyk odpowiedzi: ${responseLanguage}. Wszystkie pola tekstowe odpowiedzi, poza komendami i adresami URL, muszą być napisane wyłącznie w tym języku.\n\nDystrybucja: ${key || 'nieznana'}\n\nDozwolony kontekst źródeł dla tej dystrybucji (używaj tylko tych źródeł):\n${JSON.stringify(sources)}\n\nTreść użytkownika:\n${log}`,
+      prompt,
       stream: false,
       format: 'json',
       keep_alive: '30m',
-      options: { temperature: 0.1, num_ctx: 4096, num_predict: 800 },
+      options: { temperature: 0.1, num_ctx: 4096, num_predict: 1100 },
     }),
   });
-
   if (!ollamaResponse.ok) {
     throw new Error(`Ollama zwróciła HTTP ${ollamaResponse.status}.`);
   }
-
   const data = await ollamaResponse.json();
   return restrictSources(validateAnalysis(parseModelJson(data.response ?? ''), language), sources);
+}
+
+async function analyze(log, distro, language) {
+  const { key, sources } = sourcesForDistro(distro);
+  const responseLanguage = language === 'en' ? 'English' : 'Polish';
+  const prompt = `${systemPrompt}\n\nJęzyk odpowiedzi: ${responseLanguage}. Wszystkie pola tekstowe odpowiedzi, poza komendami i adresami URL, muszą być napisane wyłącznie w tym języku.\n\nDystrybucja: ${key || 'nieznana'}\n\nDozwolony kontekst źródeł dla tej dystrybucji (używaj tylko tych źródeł):\n${JSON.stringify(sources)}\n\nTreść użytkownika:\n${log}`;
+  const result = await requestModelAnalysis(prompt, language, sources, 70_000);
+  const likelyAction = /\b(jak|how|komend\w*|command\w*|install\w*|zainstal\w*|sprawd\w*|check\w*|napraw\w*|fix\w*)\b/i.test(log)
+    || result.steps.some((step) => /komend|polecen|terminal|command|type|run|execute|use [`]/i.test(step.description));
+  if (!likelyAction || result.steps.length === 0 || result.steps.some((step) => step.command)) return result;
+
+  try {
+    const repaired = await requestModelAnalysis(
+      `${prompt}\n\nTwoja poprzednia odpowiedź nie podała komendy w polu command: ${JSON.stringify(result)}\nJeśli istnieje bezpieczna konkretna komenda dla tego zadania, popraw JSON i wpisz ją w odpowiednim kroku. Nie wymyślaj szczegółów, których użytkownik nie podał.`,
+      language,
+      sources,
+      25_000,
+    );
+    return repaired.steps.some((step) => step.command) ? repaired : result;
+  } catch {
+    return result;
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -548,7 +600,8 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'DELETE' && request.url === '/account') {
     try {
-      const deleted = await deleteAccountData(request);
+      const supabaseDeleted = await deleteSupabaseAccount(request);
+      const deleted = supabaseDeleted ?? await deleteAccountData(request);
       sendJson(response, deleted ? 200 : 401, deleted ? { ok: true } : { error: 'Wymagany jest poprawny token Bearer.' });
     } catch (error) {
       sendJson(response, 500, { error: publicError(error, 'Nie udało się usunąć konta.') });
@@ -629,8 +682,13 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (distro !== 'arch' && distro !== 'debian') {
-      sendJson(response, 400, { error: 'Obsługiwane dystrybucje to arch i debian.' });
+    if (log.length > 20_000) {
+      sendJson(response, 400, { error: 'Treść pytania jest za długa (maksymalnie 20 000 znaków).' });
+      return;
+    }
+
+    if (!['arch', 'debian', 'fedora', 'nixos', 'cachyos'].includes(distro)) {
+      sendJson(response, 400, { error: 'Nieobsługiwana dystrybucja.' });
       return;
     }
 

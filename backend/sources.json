@@ -22,5 +22,41 @@
       "url": "https://wiki.debian.org/Apt",
       "description": "Oficjalna wiki Debiana dotycząca narzędzia apt."
     }
+  ],
+  "fedora": [
+    {
+      "title": "Fedora Docs: DNF",
+      "url": "https://docs.fedoraproject.org/en-US/quick-docs/dnf/",
+      "description": "Oficjalna dokumentacja Fedory dotycząca zarządzania pakietami przez DNF."
+    },
+    {
+      "title": "Fedora Docs: SELinux",
+      "url": "https://docs.fedoraproject.org/en-US/quick-docs/selinux-getting-started/",
+      "description": "Oficjalne wprowadzenie do diagnostyki i działania SELinux w Fedorze."
+    }
+  ],
+  "nixos": [
+    {
+      "title": "NixOS Manual",
+      "url": "https://nixos.org/manual/nixos/stable/",
+      "description": "Oficjalny podręcznik konfiguracji, zarządzania pakietami i administracji NixOS."
+    },
+    {
+      "title": "Nix Reference Manual",
+      "url": "https://nix.dev/manual/nix/latest/",
+      "description": "Oficjalna dokumentacja menedżera pakietów Nix."
+    }
+  ],
+  "cachyos": [
+    {
+      "title": "CachyOS FAQ and Troubleshooting",
+      "url": "https://wiki.cachyos.org/cachyos_basic/faq/",
+      "description": "Oficjalny przewodnik rozwiązywania problemów z pakietami, kluczami i mirrorami CachyOS."
+    },
+    {
+      "title": "CachyOS Post-install Setup",
+      "url": "https://wiki.cachyos.org/configuration/post_install_setup/",
+      "description": "Oficjalna dokumentacja aktualizacji, Pacmana i narzędzi CachyOS."
+    }
   ]
 }
