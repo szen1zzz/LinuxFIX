@@ -1201,8 +1201,6 @@ export default function App() {
   }, [distroLoadingRotation, effectsEnabled, pendingWorkspace, whooshPlayer]);
 
   const launchWorkspace = (target: WorkspaceTarget) => {
-    // Unsupported distributions must never open an unfinished workspace.
-    if (target !== 'ui' && target !== 'arch' && target !== 'debian') return;
     if (pendingWorkspace || crumblingWorkspace) return;
     triggerTileHaptic();
 
